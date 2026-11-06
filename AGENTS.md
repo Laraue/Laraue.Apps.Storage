@@ -119,8 +119,7 @@ directly, only through its own `Host{Services}` project.
   `-alpha.<run number>`).
 - `src/Laraue.Apps.Storage.Services` - core logic, not tied to gRPC: `FilesService` (upload with
   dedup and quota, download locations, delete, usage), `Buckets` (`IFileBucket`: `S3FileBucket` for B2,
-  `LocalFileBucket` for tests), `PreviewMaker`, `Cdn` (`ICdnCache`: `CloudflareCdnCache`,
-  or `NoCdnCache` without the `Cloudflare` section),
+  `LocalFileBucket` for tests), `PreviewMaker`,
   `StorageMetrics`. Invalid input is a `StorageValidationException` with an `Errors.resx` message.
 - `src/Laraue.Apps.Storage.InternalApiServices` - `StorageGrpcService` (wire <-> domain types,
   exceptions -> status codes) and the DI composition (`AddInternalApiServices()`).
@@ -136,8 +135,7 @@ directly, only through its own `Host{Services}` project.
 - `tests/Laraue.Apps.Storage.IntegrationTests` - a `WebApplicationFactory<Program>` host that hands
   back the real generated gRPC client over the in-memory `TestServer`. Files go to a temp folder
   instead of B2 (`RecordingFileBucket`, which also remembers each object's headers), `Storage:PublicBaseUrl`
-  is that folder's `file://` URL so files' URLs point into it, and `RecordingCdnCache` stands in for
-  Cloudflare.
+  is that folder's `file://` URL so files' URLs point into it.
   `using var testScope = host.CreateTestScope();` cleans the database and the folder; test classes are
   `[Collection("IntegrationTest")]`.
 
@@ -154,9 +152,12 @@ don't expire.
 - **Headers are fixed at upload** (`FileObjectHeaders`, stored with the object, B2 answers every
   download with them): the content type; `inline` for images and videos (not SVG), otherwise
   `attachment; filename=...` with the stored name - so a deduplicated file keeps its first upload's
-  name; and `public, max-age=31536000, immutable`, since a key's content never changes.
-- **Deleting** purges the file's and preview's URLs from Cloudflare (`ICdnCache`, after the commit, best
-  effort - a failure is logged and counted as `storage_bucket_failures_total{operation="purge"}`).
+  name; and `public, max-age=86400`.
+- **Deleting** removes the object from B2 but purges nothing: Cloudflare and browsers may serve a
+  deleted file for up to a day (the `max-age`), to whoever already has its URL. That window is accepted
+  (2026-11-06) in exchange for no Cloudflare API token and no purge code. A key's content never
+  changes, so the day only bounds how long deleted files linger; Cloudflare refetches from B2 about once
+  a day per cached file, which costs practically nothing.
   Browsers that already downloaded a file keep their copy.
 - `nosniff` and a sandbox CSP come from a Cloudflare response-header rule on the files domain, which
   never serves an app's pages.
@@ -188,8 +189,6 @@ Settings `InternalApiHost` needs:
 - `Storage:PublicBaseUrl` - the bucket's URL on the files domain (`https://files.laraue.com/file/<bucket>`).
   Production validates it; set it in `appsettings.Development.json` for local runs.
 - `Storage:PendingReferenceLifetime` - optional, 24 hours by default.
-- `Cloudflare:ZoneId`, `Cloudflare:ApiToken` (a token allowed only "Zone - Cache Purge" on the files
-  domain's zone) - not committed. Without the section nothing is purged on delete (tests, local runs).
 - `Bucket:LocalDirectory` - tests and local runs without a bucket: files go to that folder instead of
   B2 and the `Bucket:*` credentials aren't needed. To click through downloads locally, point `Bucket:*`
   and `Storage:PublicBaseUrl` at a development B2 bucket (or a local S3 server, MinIO) instead.
@@ -216,7 +215,7 @@ Prometheus on `InternalApiHost`'s `/_metrics` (health port), meter `Laraue.Apps.
 conventions as Feedback/Identity/Billing: labels are low-cardinality - never an owner or file id.
 - Counters (`StorageMetrics`, events, every label value starts at zero):
   `storage_uploads_total{result}` (stored, deduplicated, quota_exceeded) and
-  `storage_bucket_failures_total{operation}` (write, delete, purge) - the Infra alert on bucket errors
+  `storage_bucket_failures_total{operation}` (write, delete) - the Infra alert on bucket errors
   watches the latter.
 - Gauges (`StorageStateMetrics`, read from the database every 60 s by a background service, a scrape
   only reads the last snapshot): `storage_stored_bytes{kind}` and `storage_stored_files{kind}`
@@ -242,10 +241,10 @@ environment `internalapi-production`, approved by hand) packs `InternalApiHost`'
 to `/home/laraue/storage-internal-api-host` and rebuilds/restarts the `storage-internal-api-host`
 compose service. Set up once by a human, not in this repo: the compose service (`Laraue.Apps.Infra`,
 `services/storage-internal-api-host/`), the database `laraue_storage` (created by the migrations on
-first start), the `Bucket__*`, `Storage__PublicBaseUrl` and `Cloudflare__*` values in the server's `.env`,
+first start), the `Bucket__*` and `Storage__PublicBaseUrl` values in the server's `.env`,
 the public B2 bucket and its key, the Cloudflare side of the files domain (a proxied CNAME to the
 bucket's B2 host, a cache rule caching everything on it, a response-header rule adding `nosniff` and
-`Content-Security-Policy: sandbox; default-src 'none'`, the purge token), and this repo's GitHub
+`Content-Security-Policy: sandbox; default-src 'none'`), and this repo's GitHub
 environment/secrets
 (`SSH_*`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` for deploy notifications, `NUGET_USER` for publishing).
 
