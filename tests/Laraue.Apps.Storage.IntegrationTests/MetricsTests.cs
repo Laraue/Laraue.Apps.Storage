@@ -32,9 +32,9 @@ public class MetricsTests(InternalApiTestHost host) : IClassFixture<InternalApiT
 
         var body = await host.CreateClient().GetStringAsync("/_metrics");
 
-        Assert.Contains(Series("storage_stored_bytes", "location=\"bucket\"", uploaded.File.Size + text.Length), body);
-        Assert.Contains(Series("storage_stored_bytes", "location=\"local_disk\"", uploaded.Preview.Size), body);
-        Assert.Contains(Series("storage_stored_files", "location=\"bucket\"", 2), body);
+        Assert.Contains(Series("storage_stored_bytes", "kind=\"original\"", uploaded.File.Size + text.Length), body);
+        Assert.Contains(Series("storage_stored_bytes", "kind=\"preview\"", uploaded.Preview.Size), body);
+        Assert.Contains(Series("storage_stored_files", "kind=\"original\"", 2), body);
         Assert.Contains(Series("storage_owners", "kind=\"organization\"", 1), body);
         Assert.Contains(Series("storage_owners", "kind=\"user\"", 1), body);
         Assert.Contains(Series("storage_usage_bytes", null, uploaded.File.Size + uploaded.Preview.Size + text.Length), body);

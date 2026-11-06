@@ -57,7 +57,6 @@ namespace Laraue.Apps.Storage.DataAccess.Migrations
                     id = table.Column<Guid>(type: "uuid", nullable: false),
                     owner_id = table.Column<long>(type: "bigint", nullable: false),
                     kind = table.Column<int>(type: "integer", nullable: false),
-                    location = table.Column<int>(type: "integer", nullable: false),
                     storage_key = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     file_name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     content_type = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: false),

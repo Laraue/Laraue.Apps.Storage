@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Laraue.Apps.Storage.DataAccess.Migrations
 {
     [DbContext(typeof(DatabaseContext))]
-    [Migration("20261106122722_InitialCreate")]
+    [Migration("20261106133245_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -162,10 +162,6 @@ namespace Laraue.Apps.Storage.DataAccess.Migrations
                     b.Property<int>("Kind")
                         .HasColumnType("integer")
                         .HasColumnName("kind");
-
-                    b.Property<int>("Location")
-                        .HasColumnType("integer")
-                        .HasColumnName("location");
 
                     b.Property<long>("OwnerId")
                         .HasColumnType("bigint")

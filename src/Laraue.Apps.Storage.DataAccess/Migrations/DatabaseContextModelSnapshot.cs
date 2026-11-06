@@ -160,10 +160,6 @@ namespace Laraue.Apps.Storage.DataAccess.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("kind");
 
-                    b.Property<int>("Location")
-                        .HasColumnType("integer")
-                        .HasColumnName("location");
-
                     b.Property<long>("OwnerId")
                         .HasColumnType("bigint")
                         .HasColumnName("owner_id");

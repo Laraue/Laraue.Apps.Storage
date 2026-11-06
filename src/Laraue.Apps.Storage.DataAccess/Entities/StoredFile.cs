@@ -3,7 +3,8 @@ using System.ComponentModel.DataAnnotations;
 namespace Laraue.Apps.Storage.DataAccess.Entities;
 
 /// <summary>
-/// One stored file: an uploaded original in the bucket, or the preview made from an image on the local disk.
+/// One stored file in the bucket: an uploaded original (<c>files/&lt;id&gt;</c>), or the preview made from an image
+/// (<c>previews/&lt;id&gt;.webp</c>).
 /// </summary>
 public class StoredFile
 {
@@ -20,10 +21,8 @@ public class StoredFile
 
     public StoredFileKind Kind { get; set; }
 
-    public StoredFileLocation Location { get; set; }
-
     /// <summary>
-    /// The object key in the bucket, or the path under <c>StorageOptions.PreviewsDirectory</c>.
+    /// The object key in the bucket.
     /// </summary>
     [MaxLength(255)]
     public required string StorageKey { get; set; }
@@ -71,17 +70,4 @@ public enum StoredFileKind
 {
     Original = 0,
     Preview = 1,
-}
-
-public enum StoredFileLocation
-{
-    /// <summary>
-    /// The file bucket (Backblaze B2, S3 API).
-    /// </summary>
-    Bucket = 0,
-
-    /// <summary>
-    /// The local disk under <c>StorageOptions.PreviewsDirectory</c>.
-    /// </summary>
-    LocalDisk = 1,
 }

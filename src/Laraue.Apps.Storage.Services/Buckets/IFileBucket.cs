@@ -1,9 +1,9 @@
 namespace Laraue.Apps.Storage.Services.Buckets;
 
 /// <summary>
-/// Where file bytes are kept. Originals: <see cref="S3FileBucket"/> in production, <see cref="LocalFileBucket"/>
-/// for local runs and tests. Previews: always a <see cref="LocalFileBucket"/> on the service's disk. Bytes are only
-/// written and deleted here - clients download them straight from where they are (<see cref="GetDownloadUrl"/>).
+/// Where file bytes are kept, originals and previews alike: <see cref="S3FileBucket"/> (B2) in production,
+/// <see cref="LocalFileBucket"/> in tests. Bytes are only written and deleted here - clients download them straight
+/// from the bucket (<see cref="GetDownloadUrl"/>).
 /// </summary>
 public interface IFileBucket
 {

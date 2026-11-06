@@ -6,7 +6,7 @@ using Laraue.Apps.Storage.Services.Previews;
 using Laraue.Apps.Storage.Services.Resources;
 using Laraue.Core.DateTime.Services.Abstractions;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
@@ -108,8 +108,8 @@ public interface IFilesService
 
 public sealed class FilesService(
     DatabaseContext context,
-    [FromKeyedServices(BucketKeys.Originals)] IFileBucket originals,
-    [FromKeyedServices(BucketKeys.Previews)] IFileBucket previews,
+    IFileBucket bucket,
+    PreviewLinkCache previewLinks,
     IPreviewMaker previewMaker,
     IDateTimeProvider dateTimeProvider,
     IOptions<StorageOptions> options,
@@ -181,7 +181,6 @@ public sealed class FilesService(
             Id = Guid.CreateVersion7(),
             OwnerId = owner.Id,
             Kind = StoredFileKind.Original,
-            Location = StoredFileLocation.Bucket,
             StorageKey = string.Empty,
             FileName = fileName,
             ContentType = contentType,
@@ -200,8 +199,7 @@ public sealed class FilesService(
                 Id = Guid.CreateVersion7(),
                 OwnerId = owner.Id,
                 Kind = StoredFileKind.Preview,
-                Location = StoredFileLocation.LocalDisk,
-                StorageKey = string.Empty,
+                    StorageKey = string.Empty,
                 FileName = Path.ChangeExtension(fileName, ".webp"),
                 ContentType = PreviewMaker.ContentType,
                 Size = preview.Length,
@@ -269,23 +267,40 @@ public sealed class FilesService(
         var file = await context.StoredFiles
             .Where(x => x.Id == fileId)
             .Where(x => x.Owner!.ServiceId == serviceId)
-            .Select(x => new { x.Id, x.FileName, x.ContentType, x.Size, x.Location, x.StorageKey })
+            .Select(x => new { x.Id, x.FileName, x.ContentType, x.Size, x.Kind, x.StorageKey })
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw new StoredFileNotFoundException(fileId);
 
         var details = new FileDetails(file.Id, file.FileName, file.ContentType, file.Size);
+        var disposition = GetContentDisposition(attachment, downloadFileName ?? file.FileName);
+        var now = dateTimeProvider.UtcNow;
 
-        var expiresAt = file.Location == StoredFileLocation.LocalDisk
-            ? GetPreviewLinkExpiry(dateTimeProvider.UtcNow)
-            : dateTimeProvider.UtcNow + options.Value.DownloadUrlLifetime;
-        var download = new FileDownload(
-            file.ContentType,
-            GetContentDisposition(attachment, downloadFileName ?? file.FileName),
-            expiresAt);
+        if (file.Kind == StoredFileKind.Original)
+        {
+            var expiresAt = now + options.Value.DownloadUrlLifetime;
+            var url = await bucket.GetDownloadUrl(file.StorageKey, new FileDownload(file.ContentType, disposition, expiresAt));
 
-        var url = await BucketFor(file.Location).GetDownloadUrl(file.StorageKey, download);
+            return new FileDownloadLocation(details, url, expiresAt);
+        }
 
-        return new FileDownloadLocation(details, url, expiresAt);
+        // Previews are shown on every board render. Each signing makes a new URL, which the browser would download
+        // again; the same link all day lets it (and the caller's cached redirect) reuse the image.
+        var cacheKey = $"preview-link:{file.Id}:{disposition}";
+        if (!previewLinks.Cache.TryGetValue(cacheKey, out FileDownloadLocation? location) || location is null)
+        {
+            var expiresAt = DateTime.SpecifyKind(now.Date.AddDays(2), DateTimeKind.Utc);
+            var url = await bucket.GetDownloadUrl(file.StorageKey, new FileDownload(file.ContentType, disposition, expiresAt));
+
+            location = new FileDownloadLocation(details, url, expiresAt);
+            previewLinks.Cache.Set(cacheKey, location, new MemoryCacheEntryOptions
+            {
+                // Until the end of today, so a link handed out is always good for at least a day.
+                AbsoluteExpiration = DateTime.SpecifyKind(now.Date.AddDays(1), DateTimeKind.Utc),
+                Size = 1,
+            });
+        }
+
+        return location;
     }
 
     public async Task ConfirmReferenceAsync(
@@ -520,24 +535,17 @@ public sealed class FilesService(
         return new ReferenceDeleteResult(true, owner.UsageBytes);
     }
 
-    private IFileBucket BucketFor(StoredFileLocation location) => location switch
-    {
-        StoredFileLocation.Bucket => originals,
-        StoredFileLocation.LocalDisk => previews,
-        _ => throw new ArgumentOutOfRangeException(nameof(location), location, null),
-    };
-
     private async Task WriteContent(StoredFile file, byte[] content, CancellationToken cancellationToken)
     {
         try
         {
             using var stream = new MemoryStream(content, writable: false);
-            await BucketFor(file.Location).Write(file.StorageKey, stream, file.ContentType, cancellationToken);
+            await bucket.Write(file.StorageKey, stream, file.ContentType, cancellationToken);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
             metrics.RecordBucketFailure(StorageMetrics.BucketOperations.Write);
-            logger.LogError(e, "Couldn't write {Key} ({Location})", file.StorageKey, file.Location);
+            logger.LogError(e, "Couldn't write {Key}", file.StorageKey);
             throw;
         }
     }
@@ -546,12 +554,12 @@ public sealed class FilesService(
     {
         try
         {
-            await BucketFor(file.Location).Delete(file.StorageKey, CancellationToken.None);
+            await bucket.Delete(file.StorageKey, CancellationToken.None);
         }
         catch (Exception e)
         {
             metrics.RecordBucketFailure(StorageMetrics.BucketOperations.Delete);
-            logger.LogError(e, "Couldn't delete {Key} ({Location}); the content is left behind", file.StorageKey, file.Location);
+            logger.LogError(e, "Couldn't delete {Key}; the content is left behind", file.StorageKey);
         }
     }
 
@@ -601,12 +609,6 @@ public sealed class FilesService(
     }
 
     /// <summary>
-    /// The end of tomorrow (UTC): a preview's link is the same all day, so browsers cache it while a board is
-    /// re-rendered, and it still works for at least a day.
-    /// </summary>
-    private static DateTime GetPreviewLinkExpiry(DateTime now) => DateTime.SpecifyKind(now.Date.AddDays(2), DateTimeKind.Utc);
-
-    /// <summary>
     /// <c>inline</c>, or <c>attachment</c> with the name in both forms browsers read (ASCII and RFC 5987 UTF-8).
     /// </summary>
     private static string GetContentDisposition(bool attachment, string fileName)
@@ -622,14 +624,7 @@ public sealed class FilesService(
 
     private static string GetOriginalKey(Guid fileId) => $"files/{fileId:N}";
 
-    /// <summary>
-    /// Two levels of folders by the id's random end, so no folder grows past a few thousand entries.
-    /// </summary>
-    private static string GetPreviewKey(Guid fileId)
-    {
-        var id = fileId.ToString("N");
-        return Path.Combine(id[^2..], id[^4..^2], $"{id}.webp");
-    }
+    private static string GetPreviewKey(Guid fileId) => $"previews/{fileId:N}.webp";
 
     private static FileDetails ToDetails(StoredFile file) => new(file.Id, file.FileName, file.ContentType, file.Size);
 }

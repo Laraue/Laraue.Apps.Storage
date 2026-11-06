@@ -10,8 +10,8 @@ namespace Laraue.Apps.Storage.Services;
 
 /// <summary>
 /// Gauges of what is stored now, read from the database (exact, and surviving a restart, unlike counting in the
-/// buckets): <c>storage_stored_bytes{location}</c> and <c>storage_stored_files{location}</c> (bucket - B2 originals,
-/// what B2 bills; local_disk - previews on the server's disk), <c>storage_owners{kind}</c> (organizations and users
+/// buckets): <c>storage_stored_bytes{kind}</c> and <c>storage_stored_files{kind}</c> (original, preview - all in
+/// the B2 bucket, so their sum is what B2 bills), <c>storage_owners{kind}</c> (organizations and users
 /// that have files) and <c>storage_usage_bytes</c> (the owners' usage counters summed - it should equal the total
 /// stored bytes; a difference means a counter drifted). Registered by <c>InternalApiHost</c> only; refreshed in the
 /// background every <see cref="RefreshInterval"/>, a scrape only reads the last snapshot.
@@ -37,13 +37,13 @@ public sealed class StorageStateMetrics : BackgroundService
 
         meter.CreateObservableGauge(
             "storage.stored.bytes",
-            () => Measurements(_snapshot.StoredBytes, "location"),
-            description: "Bytes stored now, by location: bucket (B2 originals) or local_disk (previews on the server's disk).");
+            () => Measurements(_snapshot.StoredBytes, "kind"),
+            description: "Bytes stored in the bucket now, by kind: original or preview.");
 
         meter.CreateObservableGauge(
             "storage.stored.files",
-            () => Measurements(_snapshot.StoredFiles, "location"),
-            description: "Files stored now, by location: bucket (B2 originals) or local_disk (previews).");
+            () => Measurements(_snapshot.StoredFiles, "kind"),
+            description: "Files stored in the bucket now, by kind: original or preview.");
 
         meter.CreateObservableGauge(
             "storage.owners",
@@ -81,8 +81,8 @@ public sealed class StorageStateMetrics : BackgroundService
         var context = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
 
         var files = await context.StoredFiles
-            .GroupBy(x => x.Location)
-            .Select(x => new { Location = x.Key, Count = x.LongCount(), Bytes = x.Sum(f => f.Size) })
+            .GroupBy(x => x.Kind)
+            .Select(x => new { Kind = x.Key, Count = x.LongCount(), Bytes = x.Sum(f => f.Size) })
             .ToListAsync(cancellationToken);
 
         var owners = await context.Owners
@@ -94,8 +94,8 @@ public sealed class StorageStateMetrics : BackgroundService
         var usageBytes = await context.Owners.SumAsync(x => x.UsageBytes, cancellationToken);
 
         _snapshot = new Snapshot(
-            StoredBytes: ByLabel(files.ToDictionary(x => x.Location, x => x.Bytes), LocationLabel),
-            StoredFiles: ByLabel(files.ToDictionary(x => x.Location, x => x.Count), LocationLabel),
+            StoredBytes: ByLabel(files.ToDictionary(x => x.Kind, x => x.Bytes), FileKindLabel),
+            StoredFiles: ByLabel(files.ToDictionary(x => x.Kind, x => x.Count), FileKindLabel),
             Owners: ByLabel(owners.ToDictionary(x => x.Kind, x => x.Count), KindLabel),
             UsageBytes: usageBytes);
     }
@@ -109,11 +109,11 @@ public sealed class StorageStateMetrics : BackgroundService
         return Enum.GetValues<TKey>().ToDictionary(label, x => values.GetValueOrDefault(x));
     }
 
-    private static string LocationLabel(StoredFileLocation location) => location switch
+    private static string FileKindLabel(StoredFileKind kind) => kind switch
     {
-        StoredFileLocation.Bucket => "bucket",
-        StoredFileLocation.LocalDisk => "local_disk",
-        _ => throw new ArgumentOutOfRangeException(nameof(location), location, null),
+        StoredFileKind.Original => "original",
+        StoredFileKind.Preview => "preview",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
     private static string KindLabel(OwnerKind kind) => kind switch

@@ -64,7 +64,6 @@ public class ReferenceTests(InternalApiTestHost host) : IClassFixture<InternalAp
         Assert.Equal(0, response.OwnerUsageBytes);
         Assert.Equal(0, await testScope.Database.StoredFiles.CountAsync());
         Assert.Empty(Directory.EnumerateFiles(host.BucketDirectory, "*", SearchOption.AllDirectories));
-        Assert.Empty(Directory.EnumerateFiles(host.PreviewsDirectory, "*", SearchOption.AllDirectories));
         Assert.Equal(0, (await client.GetUsageAsync(new GetUsageRequest { Owner = TestFiles.Organization() })).UsageBytes);
     }
 

@@ -1,6 +1,5 @@
 using Laraue.Apps.Storage.Services;
 using Laraue.Apps.Storage.Services.Buckets;
-using Laraue.Apps.Storage.Services.Links;
 using Laraue.Apps.Storage.Services.Previews;
 using Laraue.Core.DateTime.Services.Abstractions;
 using Laraue.Core.DateTime.Services.Impl;
@@ -31,29 +30,19 @@ public static class ServiceCollectionExtensions
 
             builder.AddValidatedOptions<StorageOptions>("Storage");
 
-            builder.AddValidatedOptions<FileLinkOptions>("FileLinks");
-            builder.Services
-                .AddSingleton<FileLinkSigner>()
-                .AddSingleton<LocalFileLinks>()
-                .AddKeyedSingleton<IFileBucket>(BucketKeys.Previews, (sp, _) => new LocalFileBucket(
-                    sp.GetRequiredService<IOptions<StorageOptions>>().Value.PreviewsDirectory,
-                    LocalFileBucket.PreviewsArea,
-                    sp.GetRequiredService<LocalFileLinks>()));
+            builder.Services.AddSingleton<PreviewLinkCache>();
 
-            // Originals go to the B2 bucket. Bucket:LocalDirectory (local runs, tests) keeps them in a folder
+            // Originals and previews go to the B2 bucket. Bucket:LocalDirectory (tests) keeps them in a folder
             // instead, with no credentials needed; it's never set in production.
             var localBucketDirectory = builder.Configuration["Bucket:LocalDirectory"];
             if (string.IsNullOrEmpty(localBucketDirectory))
             {
                 builder.AddValidatedOptions<FileBucketOptions>("Bucket");
-                builder.Services.AddKeyedSingleton<IFileBucket, S3FileBucket>(BucketKeys.Originals);
+                builder.Services.AddSingleton<IFileBucket, S3FileBucket>();
             }
             else
             {
-                builder.Services.AddKeyedSingleton<IFileBucket>(BucketKeys.Originals, (sp, _) => new LocalFileBucket(
-                    localBucketDirectory,
-                    LocalFileBucket.OriginalsArea,
-                    sp.GetRequiredService<LocalFileLinks>()));
+                builder.Services.AddSingleton<IFileBucket>(new LocalFileBucket(localBucketDirectory));
             }
 
             return builder;

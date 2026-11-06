@@ -1,5 +1,5 @@
-using Grpc.Net.Client;
 using Grpc.Core.Interceptors;
+using Grpc.Net.Client;
 using Laraue.Apps.Storage.DataAccess;
 using Laraue.Apps.Storage.Internal.Contracts;
 using Laraue.Apps.Storage.InternalApiHost;
@@ -15,23 +15,10 @@ namespace Laraue.Apps.Storage.IntegrationTests.Infrastructure;
 public class InternalApiTestHost : WebApplicationFactory<Program>
 {
     /// <summary>
-    /// Shared with <see cref="PublicHost"/>, which checks the links this host signs.
-    /// </summary>
-    public const string SigningKey = "test-signing-key-0123456789abcdefghijklmnop";
-
-    private WebApiTestHost? _publicHost;
-
-    /// <summary>
-    /// The public web host, serving this host's previews and local originals from the same temp folders.
-    /// </summary>
-    public WebApiTestHost PublicHost => _publicHost ??= new WebApiTestHost(PreviewsDirectory, BucketDirectory);
-
-    /// <summary>
-    /// Stands in for the bucket: originals are written here (<c>Bucket:LocalDirectory</c>), so no test reaches B2.
+    /// Stands in for the B2 bucket (<c>Bucket:LocalDirectory</c>), so no test reaches B2. Download links are
+    /// <c>file://</c> URLs into it.
     /// </summary>
     public string BucketDirectory { get; } = Path.Combine(Path.GetTempPath(), "storage-tests", Guid.NewGuid().ToString("N"), "bucket");
-
-    public string PreviewsDirectory { get; } = Path.Combine(Path.GetTempPath(), "storage-tests", Guid.NewGuid().ToString("N"), "previews");
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -41,10 +28,6 @@ public class InternalApiTestHost : WebApplicationFactory<Program>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Bucket:LocalDirectory"] = BucketDirectory,
-                ["Storage:PreviewsDirectory"] = PreviewsDirectory,
-                // TestServer's address: download links point at PublicHost.
-                ["Storage:PublicBaseUrl"] = "http://localhost",
-                ["FileLinks:SigningKey"] = SigningKey,
             });
         });
 
@@ -82,29 +65,21 @@ public class InternalApiTestHost : WebApplicationFactory<Program>
     }
 
     /// <summary>
-    /// Wipes the database and the bucket and previews folders, so a test sees only its own files.
+    /// Wipes the database and the bucket folder, so a test sees only its own files.
     /// </summary>
     public InternalApiTestHostScope CreateTestScope()
     {
-        foreach (var directory in new[] { BucketDirectory, PreviewsDirectory })
-        {
-            if (Directory.Exists(directory))
-                Directory.Delete(directory, recursive: true);
-        }
+        if (Directory.Exists(BucketDirectory))
+            Directory.Delete(BucketDirectory, recursive: true);
 
         return new InternalApiTestHostScope(Services.CreateScope());
     }
 
     protected override void Dispose(bool disposing)
     {
-        _publicHost?.Dispose();
         base.Dispose(disposing);
 
         var root = Directory.GetParent(BucketDirectory)!.FullName;
-        if (Directory.Exists(root))
-            Directory.Delete(root, recursive: true);
-
-        root = Directory.GetParent(PreviewsDirectory)!.FullName;
         if (Directory.Exists(root))
             Directory.Delete(root, recursive: true);
     }

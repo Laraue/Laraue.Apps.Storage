@@ -49,18 +49,6 @@ jobs:
         path: internal-api-host.tar.gz
         retention-days: 7
 
-    - name: Pack Web API Host
-      if: github.ref == 'refs/heads/main'
-      run: tar -czf web-api-host.tar.gz -C src/Laraue.Apps.Storage.WebApiHost/bin/Release/net10.0 .
-
-    - name: Upload Web API Host artifact
-      if: github.ref == 'refs/heads/main'
-      uses: actions/upload-artifact@v4
-      with:
-        name: web-api-host
-        path: web-api-host.tar.gz
-        retention-days: 7
-
   deploy:
     needs: build-and-test
     if: github.ref == 'refs/heads/main'
@@ -75,12 +63,6 @@ jobs:
             remote_dir: /home/laraue/storage-internal-api-host
             image: storage-internal-api-host
             environment: internalapi-production
-          - name: Storage Web API Host
-            artifact: web-api-host
-            archive: web-api-host.tar.gz
-            remote_dir: /home/laraue/storage-web-api-host
-            image: storage-web-api-host
-            environment: webapi-production
     environment: ${{ matrix.environment }}
     steps:
     - name: Notify deploy started

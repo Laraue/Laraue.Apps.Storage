@@ -33,10 +33,10 @@ service StorageService {
   // A file's name, type and size. NOT_FOUND for an unknown or deleted file.
   rpc GetFile (GetFileRequest) returns (StoredFile);
 
-  // A link the caller redirects its client to (302) for the file's bytes - they never pass through
-  // gRPC or the caller. An original gets a short-lived signed bucket link; a preview gets a signed
-  // link to this service's public web host, stable for a day so browsers cache it. Both serve byte
-  // ranges. NOT_FOUND for an unknown file.
+  // A presigned bucket link the caller redirects its client to (302) for the file's bytes - they
+  // never pass through gRPC or the caller. An original's link works for half an hour; a preview's
+  // is the same all day and works until the end of the next day, so browsers cache the image. The
+  // bucket serves byte ranges. NOT_FOUND for an unknown file.
   rpc GetDownloadUrl (GetDownloadUrlRequest) returns (GetDownloadUrlResponse);
 
   // Deletes a reference (pending or confirmed). When it was the file's last one, the file and its

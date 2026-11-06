@@ -1,15 +1,14 @@
 # Laraue.Apps.Storage
 
 Internal file storage service for the Laraue.* apps. Every consuming app (`Laraue Boards` first) keeps
-its users' uploaded files here over internal gRPC: originals in a Backblaze B2 bucket (S3 API), image
-previews on the server's disk. The service counts each owner's usage and checks it against the limit
+its users' uploaded files here over internal gRPC, in a Backblaze B2 bucket (S3 API): originals and the
+image previews made from them. The service counts each owner's usage and checks it against the limit
 the caller passes; the limits themselves stay in the calling app. See [AGENTS.md](AGENTS.md) for the
 design and what's deliberately *not* built yet.
 
-**Stage 1 (BRD-339)**: internal gRPC `UploadFile`, `GetFile`, `GetDownloadUrl` (a signed link to
-redirect to - file bytes never go out through gRPC), `ConfirmReference`, `DeleteReference`,
-`GetUsage`; and a small public web
-host that serves previews from the server's disk for signed links only.
+**Stage 1 (BRD-339)**: internal gRPC `UploadFile`, `GetFile`, `GetDownloadUrl` (a presigned bucket link
+to redirect to - file bytes never go out through gRPC), `ConfirmReference`, `DeleteReference`,
+`GetUsage`.
 
 ## License
 
