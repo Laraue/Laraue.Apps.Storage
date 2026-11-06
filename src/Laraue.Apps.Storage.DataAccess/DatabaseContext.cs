@@ -70,11 +70,6 @@ public class DatabaseContext : DbContext
         modelBuilder.Entity<FileReference>(builder =>
         {
             builder.Property(x => x.Id).ValueGeneratedNever();
-            builder
-                .HasOne(x => x.File)
-                .WithMany(x => x.References)
-                .HasForeignKey(x => x.FileId)
-                .OnDelete(DeleteBehavior.Cascade);
             // PendingReferencesCleaner: the oldest pending ones.
             builder.HasIndex(x => new { x.State, x.CreatedAt });
         });
