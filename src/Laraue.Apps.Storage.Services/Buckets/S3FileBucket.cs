@@ -35,6 +35,27 @@ public sealed class S3FileBucket : IFileBucket, IDisposable
         await _client.PutObjectAsync(CreatePutRequest(key, content, headers), cancellationToken);
     }
 
+    public async Task<FileObject?> Read(string key, CancellationToken cancellationToken)
+    {
+        GetObjectResponse response;
+        try
+        {
+            response = await _client.GetObjectAsync(_bucketName, key, cancellationToken);
+        }
+        catch (AmazonS3Exception e) when (e.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        return new FileObject(
+            response.ResponseStream,
+            response.ContentLength,
+            new FileObjectHeaders(
+                response.Headers.ContentType,
+                response.Headers.ContentDisposition,
+                response.Headers.CacheControl));
+    }
+
     /// <summary>
     /// The upload request: B2 keeps <c>Content-Type</c>, <c>Content-Disposition</c> and <c>Cache-Control</c> with the
     /// object and answers every download with them.

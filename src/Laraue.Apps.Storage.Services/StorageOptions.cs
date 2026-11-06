@@ -17,8 +17,8 @@ public class StorageOptions
     public int MaxFileSizeBytes { get; set; }
 
     /// <summary>
-    /// Where clients download files: the bucket's public URL on the files domain, behind Cloudflare, e.g.
-    /// <c>https://files.laraue.com/file/laraue-files</c>. A file's URL is this plus its key
+    /// Where clients download files: the public host (<c>WebApiHost</c>) behind Cloudflare,
+    /// <c>https://storage.laraue.com</c>. A file's URL is this plus its key
     /// (<c>/files/&lt;id&gt;</c>, <c>/previews/&lt;id&gt;.webp</c>).
     /// </summary>
     [Required]

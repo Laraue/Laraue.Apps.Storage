@@ -25,6 +25,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\..\src\Laraue.Apps.Storage.InternalApiHost\Laraue.Apps.Storage.InternalApiHost.csproj" />
+      <ProjectReference Include="..\..\src\Laraue.Apps.Storage.WebApiHost\Laraue.Apps.Storage.WebApiHost.csproj" />
     </ItemGroup>
 
     <ItemGroup>

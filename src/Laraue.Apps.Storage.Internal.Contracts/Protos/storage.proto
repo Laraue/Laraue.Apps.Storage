@@ -62,8 +62,8 @@ message StoredFile {
   string content_type = 3;
   // Stored size in bytes.
   int64 size = 4;
-  // Where clients download the file: a public, permanent URL on the files domain (B2 behind
-  // Cloudflare, cached at the edge). The file's id is in it and unguessable, which is the only
+  // Where clients download the file: a public, permanent URL on this service's public host
+  // (storage.laraue.com, behind Cloudflare, which caches it). The file's id is in it and unguessable, which is the only
   // access check - like a caller's own link by file id. Callers redirect to it (302) or use it
   // directly; file bytes never pass through gRPC. Images and videos are served inline, other files
   // as attachments named file_name. After the file is deleted, caches may still serve it for up to

@@ -18,5 +18,7 @@ public sealed class RecordingFileBucket(string directory) : IFileBucket
         return _inner.Write(key, content, headers, cancellationToken);
     }
 
+    public Task<FileObject?> Read(string key, CancellationToken cancellationToken) => _inner.Read(key, cancellationToken);
+
     public Task Delete(string key, CancellationToken cancellationToken) => _inner.Delete(key, cancellationToken);
 }
