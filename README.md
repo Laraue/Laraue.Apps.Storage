@@ -6,8 +6,8 @@ previews on the server's disk. The service counts each owner's usage and checks 
 the caller passes; the limits themselves stay in the calling app. See [AGENTS.md](AGENTS.md) for the
 design and what's deliberately *not* built yet.
 
-**Stage 1 (BRD-339)**: `UploadFile`, `GetFile`, `ReadFile` (streamed, byte ranges), `DeleteFile`,
-`GetUsage`.
+**Stage 1 (BRD-339)**: `UploadFile`, `GetFile`, `GetDownloadUrl` (a signed bucket link to redirect to,
+or a previews path for nginx - file bytes never go out through gRPC), `DeleteFile`, `GetUsage`.
 
 ## License
 

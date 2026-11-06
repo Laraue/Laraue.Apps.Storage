@@ -35,11 +35,23 @@ public static class ServiceCollectionExtensions
                 builder.Services.AddSingleton<S3FileBucket>();
             }
 
-            builder.Services.AddSingleton(sp => new FileBuckets(
-                string.IsNullOrEmpty(localBucketDirectory)
-                    ? sp.GetRequiredService<S3FileBucket>()
-                    : new LocalFileBucket(localBucketDirectory),
-                new LocalFileBucket(sp.GetRequiredService<IOptions<StorageOptions>>().Value.PreviewsDirectory)));
+            builder.Services.AddSingleton(sp =>
+            {
+                var storageOptions = sp.GetRequiredService<IOptions<StorageOptions>>().Value;
+                var localFilesBaseUrl = string.IsNullOrEmpty(storageOptions.LocalFilesBaseUrl)
+                    ? null
+                    : storageOptions.LocalFilesBaseUrl.TrimEnd('/');
+
+                return new FileBuckets(
+                    string.IsNullOrEmpty(localBucketDirectory)
+                        ? sp.GetRequiredService<S3FileBucket>()
+                        : new LocalFileBucket(
+                            localBucketDirectory,
+                            localFilesBaseUrl is null ? null : $"{localFilesBaseUrl}/{LocalFilesEndpoint.OriginalsArea}"),
+                    new LocalFileBucket(
+                        storageOptions.PreviewsDirectory,
+                        localFilesBaseUrl is null ? null : $"{localFilesBaseUrl}/{LocalFilesEndpoint.PreviewsArea}"));
+            });
 
             return builder;
         }

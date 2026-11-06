@@ -8,16 +8,17 @@ obvious from the code alone.
 The internal file storage service for the Laraue.* ecosystem (BRD-226, BRD-339). A Laraue app
 (`Laraue Boards` first; feedback screenshots, BRD-227, later) sends the files its users upload
 here and keeps only the returned file ids. It is internal on purpose: users never call it directly,
-the app they're in does, over gRPC, and serves the files to its users itself (Boards streams them
-through its own `/api/files/{id}`, so links and permissions stay the app's).
+the app they're in does, over gRPC. File bytes never pass through gRPC on the way out: the app keeps
+its own links (Boards' `/api/files/{id}`, so permissions stay the app's) and answers them with a
+redirect to where the bytes are - see "Downloads".
 
 **Stage 1 (BRD-339)**: internal gRPC only (`Protos/storage.proto`, `StorageService`).
 - `UploadFile(owner, user_id?, file_name, content_type, content, quota_bytes?)`, where `owner` is an
   `Owner` message (a oneof of `organization_id` or `user_id`) -> the stored file,
   its preview for an image, the owner's usage after the upload, and whether it was a duplicate - or
   `quota_exceeded` (usage, quota, required bytes) with nothing stored.
-- `GetFile(file_id)`, `ReadFile(file_id, range?)` (server streaming: one header message, then 64 KB
-  data messages; `OUT_OF_RANGE` with a `total-length` trailer for a range past the end),
+- `GetFile(file_id)`, `GetDownloadUrl(file_id, attachment, download_file_name?)` (a signed bucket
+  link, or a previews path for nginx - see "Downloads"),
   `DeleteFile(file_id)`, `GetUsage(owner)`.
 - Every call needs the `x-laraue-service-id` header, and a service only sees its own files: another
   service's file id is `NOT_FOUND`.
@@ -27,7 +28,8 @@ through its own `/api/files/{id}`, so links and permissions stay the app's).
   same transaction, so it shouldn't drift; add a repair job only if it does).
 - Cleaning up content left behind when a write or delete failed half-way (logged and counted in
   `storage_bucket_failures_total`).
-- A public HTTP endpoint or signed URLs. Callers stream files through themselves.
+- Uploads straight from the client to the bucket (signed upload links). An upload passes through the
+  calling app and one gRPC message, since this service needs the bytes for the hash and the preview.
 - Type checks beyond what previews need - see "What this service checks".
 
 ## Domain model
@@ -87,17 +89,18 @@ directly, only through its own `Host{Services}` project.
 
 - `src/Laraue.Apps.Storage.DataAccess` - EF Core `DatabaseContext`, entities, migrations.
 - `src/Laraue.Apps.Storage.Internal.Contracts` - the `.proto` contract plus generated stubs
-  (`GrpcServices="Both"`), `GrpcHeaders` and `ServiceIdInterceptor` (which also covers `ReadFile`'s
-  server streaming). `IsPackable=true` - published to NuGet.org as
+  (`GrpcServices="Both"`), `GrpcHeaders` and `ServiceIdInterceptor` (unary and server-streaming
+  calls). `IsPackable=true` - published to NuGet.org as
   `Laraue.Apps.Storage.Internal.Contracts` via `.github/workflows/nuget-publish.yml` (manual trigger;
   `main` publishes the base `<Version>` from `Directory.Build.props`, any other branch appends
   `-alpha.<run number>`).
 - `src/Laraue.Apps.Storage.Services` - core logic, not tied to gRPC: `FilesService` (upload with
-  dedup and quota, read, delete, usage), `Buckets` (`IFileBucket`: `S3FileBucket` for B2,
+  dedup and quota, download locations, delete, usage), `Buckets` (`IFileBucket`: `S3FileBucket` for B2,
   `LocalFileBucket` for previews and for originals in local runs/tests), `PreviewMaker`,
   `StorageMetrics`. Invalid input is a `StorageValidationException` with an `Errors.resx` message.
 - `src/Laraue.Apps.Storage.InternalApiServices` - `StorageGrpcService` (wire <-> domain types,
-  exceptions -> status codes) and the DI composition (`AddInternalApiServices()`). The generated
+  exceptions -> status codes), the DI composition (`AddInternalApiServices()`) and
+  `LocalFilesEndpoint` (local runs and tests only, see "Downloads"). The generated
   proto types share names with the domain ones (`ServiceId`, `StoredFile`, `QuotaExceeded`), so the
   file aliases them as `Contracts.`/`Domain.`.
 - `src/Laraue.Apps.Storage.InternalApiHost` - the gRPC host: `Program.cs` only (Kestrel h2c, DI,
@@ -112,11 +115,29 @@ directly, only through its own `Host{Services}` project.
   `using var testScope = host.CreateTestScope();` cleans the database; test classes are
   `[Collection("IntegrationTest")]`.
 
+## Downloads
+
+`GetDownloadUrl` says where the caller sends its client; the caller answers its own link with it:
+- **Originals** (the bucket): a presigned S3 GET link (`S3FileBucket.GetDownloadUrl`, signed locally,
+  no request to B2), valid `Storage:DownloadUrlLifetime` (30 min by default - long enough for a video's
+  range requests on the same link). `response-content-type` and `response-content-disposition` make B2
+  answer with the stored type and `inline` or `attachment; filename=...` (the caller's name for the
+  download). The caller redirects (302); B2 serves byte ranges itself. Files then come from B2's domain,
+  never the app's, so an uploaded file can't run as a page on the app's origin.
+- **Previews** (local disk): `internal_path`, the path under the previews volume. The caller answers
+  with `X-Accel-Redirect` to an `internal` nginx location that has the volume mounted read-only, so
+  previews (read on every board render) are served by nginx with caching, no B2 request and no .NET.
+- **Local runs and tests**: no B2 and no nginx. With `Storage:LocalFilesBaseUrl` set (e.g.
+  `http://localhost:5564/_local-files`), both kinds get links to `LocalFilesEndpoint` on this host,
+  which serves files with ranges, the given type and disposition. It isn't mapped when the setting is
+  empty, which it always is in production.
+
 ## The bucket
 
 - A Backblaze B2 bucket of its own, separate from the restic backup bucket, reached through the
   S3-compatible API (`AWSSDK.S3`) with an application key limited to this bucket. The key needs
-  read, write, **list and delete**: B2 keeps every version of a file by default, and a plain
+  read, write, **list and delete** (signing download links needs no extra permission, but the links
+only work with read): B2 keeps every version of a file by default, and a plain
   `DeleteObject` only hides it (still stored and billed), so `S3FileBucket.Delete` lists and deletes
   each version.
 - The SDK's default CRC checksum headers are turned off (`WHEN_REQUIRED`) and payloads are signed in
@@ -136,8 +157,10 @@ Settings `InternalApiHost` needs:
   for local runs. `Storage:MaxFileSizeBytes` - optional, 20 MB by default.
 - `Bucket:ServiceUrl`, `Bucket:Region`, `Bucket:BucketName`, `Bucket:KeyId`, `Bucket:ApplicationKey`
   - not committed; Production validates them at startup.
+- `Storage:DownloadUrlLifetime` - optional, 30 minutes by default.
 - `Bucket:LocalDirectory` - local runs and tests only: originals go to that folder instead of B2, and
-  the `Bucket:*` credentials aren't needed. Put it in `appsettings.Development.json` (git-ignored).
+  the `Bucket:*` credentials aren't needed. With `Storage:LocalFilesBaseUrl` (see "Downloads"). Put
+  both in `appsettings.Development.json` (git-ignored).
 
 ## EF Core
 
@@ -159,7 +182,7 @@ Always `ILogger<T>`, never the bare non-generic `ILogger`.
 
 Prometheus on `InternalApiHost`'s `/_metrics` (health port), meter `Laraue.Apps.Storage`
 (`StorageMetrics`): `storage_uploads_total{result}` (stored, deduplicated, quota_exceeded) and
-`storage_bucket_failures_total{operation}` (write, read, delete) - the Infra alert on bucket errors
+`storage_bucket_failures_total{operation}` (write, delete) - the Infra alert on bucket errors
 watches the latter. Same conventions as Feedback/Identity/Billing: counters are events, every label
 value starts at zero, labels are low-cardinality - never an owner or file id.
 

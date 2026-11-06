@@ -1,7 +1,6 @@
-using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Laraue.Apps.Storage.Services;
-using Laraue.Apps.Storage.Services.Buckets;
 // The generated proto types share names with the domain ones (ServiceId, StoredFile, QuotaExceeded) - alias the
 // contract side to keep both usable here.
 using Contracts = Laraue.Apps.Storage.Internal.Contracts;
@@ -16,11 +15,6 @@ namespace Laraue.Apps.Storage.InternalApiServices;
 public sealed class StorageGrpcService(IFilesService filesService)
     : Contracts.StorageService.StorageServiceBase
 {
-    /// <summary>
-    /// The size of each data message <see cref="ReadFile"/> sends.
-    /// </summary>
-    public const int ChunkSize = 64 * 1024;
-
     public override async Task<Contracts.UploadFileResponse> UploadFile(
         Contracts.UploadFileRequest request,
         ServerCallContext context)
@@ -65,39 +59,32 @@ public sealed class StorageGrpcService(IFilesService filesService)
         return ToContractFile(file);
     }
 
-    public override async Task ReadFile(
-        Contracts.ReadFileRequest request,
-        IServerStreamWriter<Contracts.ReadFileResponse> responseStream,
+    public override async Task<Contracts.GetDownloadUrlResponse> GetDownloadUrl(
+        Contracts.GetDownloadUrlRequest request,
         ServerCallContext context)
     {
         var serviceId = ReadDomainServiceId(context);
         var fileId = ParseFileId(request.FileId);
-        var range = ToRange(request);
 
-        var result = await ExecuteAsync(() => filesService.ReadAsync(serviceId, fileId, range, context.CancellationToken));
-        await using var content = result.Content;
+        var location = await ExecuteAsync(() => filesService.GetDownloadLocationAsync(
+            serviceId,
+            fileId,
+            request.Attachment,
+            string.IsNullOrEmpty(request.DownloadFileName) ? null : request.DownloadFileName,
+            context.CancellationToken));
 
-        await responseStream.WriteAsync(new Contracts.ReadFileResponse
+        var response = new Contracts.GetDownloadUrlResponse { File = ToContractFile(location.File) };
+        if (location.Url is not null)
         {
-            Header = new Contracts.ReadFileHeader
-            {
-                File = ToContractFile(result.File),
-                From = result.From,
-                To = result.To,
-                TotalLength = result.TotalLength,
-                Partial = result.IsPartial,
-            },
-        });
-
-        var buffer = new byte[ChunkSize];
-        int read;
-        while ((read = await content.ReadAsync(buffer, context.CancellationToken)) > 0)
-        {
-            await responseStream.WriteAsync(new Contracts.ReadFileResponse
-            {
-                Data = ByteString.CopyFrom(buffer, 0, read),
-            });
+            response.Url = location.Url;
+            response.ExpiresAt = Timestamp.FromDateTime(DateTime.SpecifyKind(location.ExpiresAt!.Value, DateTimeKind.Utc));
         }
+        else
+        {
+            response.InternalPath = location.InternalPath;
+        }
+
+        return response;
     }
 
     public override async Task<Contracts.DeleteFileResponse> DeleteFile(
@@ -141,13 +128,6 @@ public sealed class StorageGrpcService(IFilesService filesService)
         {
             throw new RpcException(new Status(StatusCode.NotFound, e.Message));
         }
-        catch (FileBucketRangeNotSatisfiableException e)
-        {
-            throw new RpcException(new Status(StatusCode.OutOfRange, e.Message), new Metadata
-            {
-                { "total-length", e.TotalLength.ToString() },
-            });
-        }
     }
 
     private static OwnerRef ToOwnerRef(Contracts.Owner? owner) => owner?.KindCase switch
@@ -158,19 +138,6 @@ public sealed class StorageGrpcService(IFilesService filesService)
             : throw new RpcException(new Status(StatusCode.InvalidArgument, $"Invalid owner user id '{owner.UserId}'.")),
         _ => throw new RpcException(new Status(StatusCode.InvalidArgument, "The owner is required.")),
     };
-
-    private static FileBucketRange? ToRange(Contracts.ReadFileRequest request)
-    {
-        if (request.HasSuffixLength)
-            return new FileBucketRange(null, null, request.SuffixLength);
-
-        if (!request.HasRangeFrom && !request.HasRangeTo)
-            return null;
-
-        return new FileBucketRange(
-            request.HasRangeFrom ? request.RangeFrom : null,
-            request.HasRangeTo ? request.RangeTo : null);
-    }
 
     private static Contracts.UploadedFile ToContractUploaded(FileUploaded uploaded)
     {

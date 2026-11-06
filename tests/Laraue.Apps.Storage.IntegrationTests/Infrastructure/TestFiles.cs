@@ -1,5 +1,4 @@
 using Google.Protobuf;
-using Grpc.Core;
 using Laraue.Apps.Storage.Internal.Contracts;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -38,24 +37,16 @@ public static class TestFiles
     }
 
     /// <summary>
-    /// Reads a whole <c>ReadFile</c> stream: its header and the data concatenated.
+    /// Asks for the file's download link and downloads it from the test host's local-files endpoint, the way a
+    /// client follows the redirect.
     /// </summary>
-    public static async Task<(ReadFileHeader Header, byte[] Data)> ReadAll(
-        this StorageService.StorageServiceClient client,
-        ReadFileRequest request)
+    public static async Task<byte[]> Download(
+        this InternalApiTestHost host,
+        StorageService.StorageServiceClient client,
+        string fileId)
     {
-        using var call = client.ReadFile(request);
-        ReadFileHeader? header = null;
-        using var data = new MemoryStream();
+        var location = await client.GetDownloadUrlAsync(new GetDownloadUrlRequest { FileId = fileId });
 
-        await foreach (var message in call.ResponseStream.ReadAllAsync())
-        {
-            if (message.PartCase == ReadFileResponse.PartOneofCase.Header)
-                header = message.Header;
-            else
-                data.Write(message.Data.Span);
-        }
-
-        return (header!, data.ToArray());
+        return await host.CreateClient().GetByteArrayAsync(location.Url);
     }
 }

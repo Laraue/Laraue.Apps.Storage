@@ -1,4 +1,3 @@
-using System.Net;
 using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.S3.Model;
@@ -47,40 +46,22 @@ public sealed class S3FileBucket : IFileBucket, IDisposable
             cancellationToken);
     }
 
-    public async Task<FileBucketObject> Read(string key, FileBucketRange? range, CancellationToken cancellationToken)
+    public Task<string> GetDownloadUrl(string key, FileDownload download)
     {
-        var request = new GetObjectRequest
+        // Signed locally, no request to the bucket. The bucket answers byte ranges itself.
+        return _client.GetPreSignedURLAsync(new GetPreSignedUrlRequest
         {
             BucketName = _bucketName,
             Key = key,
-        };
-
-        if (range is not null)
-            request.ByteRange = ToByteRange(range);
-
-        GetObjectResponse response;
-        try
-        {
-            response = await _client.GetObjectAsync(request, cancellationToken);
-        }
-        catch (AmazonS3Exception e) when (e.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
-        {
-            var metadata = await _client.GetObjectMetadataAsync(_bucketName, key, cancellationToken);
-            throw new FileBucketRangeNotSatisfiableException(metadata.ContentLength);
-        }
-        catch (AmazonS3Exception e) when (e.StatusCode == HttpStatusCode.NotFound)
-        {
-            throw new FileNotFoundException($"Object {key} is not in the bucket.", e);
-        }
-
-        var length = response.ContentLength;
-        if (response.HttpStatusCode != HttpStatusCode.PartialContent
-            || !TryParseContentRange(response.ContentRange, out var from, out var to, out var totalLength))
-        {
-            return new FileBucketObject(response.ResponseStream, 0, Math.Max(length - 1, 0), length, false);
-        }
-
-        return new FileBucketObject(response.ResponseStream, from, to, totalLength, true);
+            Verb = HttpVerb.GET,
+            Protocol = Protocol.HTTPS,
+            Expires = download.ExpiresAt,
+            ResponseHeaderOverrides =
+            {
+                ContentType = download.ContentType,
+                ContentDisposition = download.ContentDisposition,
+            },
+        });
     }
 
     public async Task Delete(string key, CancellationToken cancellationToken)
@@ -114,31 +95,5 @@ public sealed class S3FileBucket : IFileBucket, IDisposable
     public void Dispose()
     {
         _client.Dispose();
-    }
-
-    private static ByteRange ToByteRange(FileBucketRange range)
-    {
-        if (range.SuffixLength is { } suffix)
-            return new ByteRange($"bytes=-{suffix}");
-
-        return range.To is { } to
-            ? new ByteRange(range.From ?? 0, to)
-            : new ByteRange($"bytes={range.From ?? 0}-");
-    }
-
-    /// <summary>
-    /// Parses <c>bytes 0-99/1000</c>.
-    /// </summary>
-    private static bool TryParseContentRange(string? contentRange, out long from, out long to, out long totalLength)
-    {
-        from = to = totalLength = 0;
-        if (contentRange is null || !contentRange.StartsWith("bytes ", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        var parts = contentRange["bytes ".Length..].Split('/', '-');
-        return parts.Length == 3
-            && long.TryParse(parts[0], out from)
-            && long.TryParse(parts[1], out to)
-            && long.TryParse(parts[2], out totalLength);
     }
 }

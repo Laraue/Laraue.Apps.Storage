@@ -32,15 +32,12 @@ public class UploadFileTests(InternalApiTestHost host) : IClassFixture<InternalA
         Assert.Equal("photo.webp", uploaded.Preview.FileName);
         Assert.Equal(png.Length + uploaded.Preview.Size, uploaded.OwnerUsageBytes);
 
-        var (_, previewBytes) = await client.ReadAll(new ReadFileRequest { FileId = uploaded.Preview.Id });
+        var previewBytes = await host.Download(client, uploaded.Preview.Id);
         var previewInfo = Image.Identify(previewBytes);
         Assert.Equal(640, previewInfo.Width);
         Assert.Equal(320, previewInfo.Height);
 
-        var (header, originalBytes) = await client.ReadAll(new ReadFileRequest { FileId = uploaded.File.Id });
-        Assert.Equal(png, originalBytes);
-        Assert.False(header.Partial);
-        Assert.Equal(png.Length, header.TotalLength);
+        Assert.Equal(png, await host.Download(client, uploaded.File.Id));
     }
 
     [Fact]
@@ -51,7 +48,7 @@ public class UploadFileTests(InternalApiTestHost host) : IClassFixture<InternalA
 
         var response = await client.UploadFileAsync(TestFiles.Upload(TestFiles.Png(100, 50), "small.png", "image/png"));
 
-        var (_, previewBytes) = await client.ReadAll(new ReadFileRequest { FileId = response.Uploaded.Preview.Id });
+        var previewBytes = await host.Download(client, response.Uploaded.Preview.Id);
         var previewInfo = Image.Identify(previewBytes);
         Assert.Equal(100, previewInfo.Width);
         Assert.Equal(50, previewInfo.Height);

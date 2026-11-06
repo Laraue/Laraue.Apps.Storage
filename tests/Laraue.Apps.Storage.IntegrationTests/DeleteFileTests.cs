@@ -37,8 +37,7 @@ public class DeleteFileTests(InternalApiTestHost host) : IClassFixture<InternalA
 
         Assert.False(first.Deleted);
         Assert.Equal(6, first.OwnerUsageBytes);
-        var (_, data) = await client.ReadAll(new ReadFileRequest { FileId = uploaded.File.Id });
-        Assert.Equal("shared", System.Text.Encoding.UTF8.GetString(data));
+        Assert.Equal("shared", System.Text.Encoding.UTF8.GetString(await host.Download(client, uploaded.File.Id)));
 
         var second = await client.DeleteFileAsync(new DeleteFileRequest { FileId = uploaded.File.Id });
 

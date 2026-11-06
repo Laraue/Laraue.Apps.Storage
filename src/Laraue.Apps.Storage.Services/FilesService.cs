@@ -8,6 +8,7 @@ using Laraue.Core.DateTime.Services.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Net.Http.Headers;
 
 namespace Laraue.Apps.Storage.Services;
 
@@ -46,16 +47,10 @@ public sealed record QuotaExceeded(long OwnerUsageBytes, long QuotaBytes, long R
 public sealed record FileDeleteResult(bool Deleted, long OwnerUsageBytes);
 
 /// <summary>
-/// <see cref="Content"/> holds bytes <see cref="From"/>..<see cref="To"/> of <see cref="TotalLength"/>; the caller
-/// owns it.
+/// Where a client downloads a file: <see cref="Url"/> (redirect until <see cref="ExpiresAt"/>) or, for a preview
+/// served by nginx, <see cref="InternalPath"/> under the previews volume.
 /// </summary>
-public sealed record FileReadResult(
-    FileDetails File,
-    Stream Content,
-    long From,
-    long To,
-    long TotalLength,
-    bool IsPartial);
+public sealed record FileDownloadLocation(FileDetails File, string? Url, string? InternalPath, DateTime? ExpiresAt);
 
 public interface IFilesService
 {
@@ -71,13 +66,14 @@ public interface IFilesService
     Task<FileDetails> GetAsync(ServiceId serviceId, Guid fileId, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Opens the file or a range of it. Throws <see cref="StoredFileNotFoundException"/> and
-    /// <see cref="FileBucketRangeNotSatisfiableException"/>.
+    /// Where to download the file from, saved as <paramref name="downloadFileName"/> (the stored name when null)
+    /// when <paramref name="attachment"/>. Throws <see cref="StoredFileNotFoundException"/>.
     /// </summary>
-    Task<FileReadResult> ReadAsync(
+    Task<FileDownloadLocation> GetDownloadLocationAsync(
         ServiceId serviceId,
         Guid fileId,
-        FileBucketRange? range,
+        bool attachment,
+        string? downloadFileName,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -236,10 +232,11 @@ public sealed class FilesService(
             ?? throw new StoredFileNotFoundException(fileId);
     }
 
-    public async Task<FileReadResult> ReadAsync(
+    public async Task<FileDownloadLocation> GetDownloadLocationAsync(
         ServiceId serviceId,
         Guid fileId,
-        FileBucketRange? range,
+        bool attachment,
+        string? downloadFileName,
         CancellationToken cancellationToken)
     {
         var file = await context.StoredFiles
@@ -249,30 +246,21 @@ public sealed class FilesService(
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw new StoredFileNotFoundException(fileId);
 
-        FileBucketObject content;
-        try
-        {
-            content = await buckets.For(file.Location).Read(file.StorageKey, range, cancellationToken);
-        }
-        catch (FileNotFoundException e)
-        {
-            metrics.RecordBucketFailure(StorageMetrics.BucketOperations.Read);
-            logger.LogError(e, "File {FileId} is in the database but its content at {Key} is missing", file.Id, file.StorageKey);
-            throw new StoredFileNotFoundException(fileId);
-        }
-        catch (Exception e) when (e is not FileBucketRangeNotSatisfiableException and not OperationCanceledException)
-        {
-            metrics.RecordBucketFailure(StorageMetrics.BucketOperations.Read);
-            throw;
-        }
+        var details = new FileDetails(file.Id, file.FileName, file.ContentType, file.Size);
 
-        return new FileReadResult(
-            new FileDetails(file.Id, file.FileName, file.ContentType, file.Size),
-            content.Content,
-            content.From,
-            content.To,
-            content.TotalLength,
-            content.IsPartial);
+        // Previews are read on every board render: nginx serves them from the volume, no link to sign.
+        if (file.Location == StoredFileLocation.LocalDisk && string.IsNullOrEmpty(options.Value.LocalFilesBaseUrl))
+            return new FileDownloadLocation(details, null, file.StorageKey.Replace('\\', '/'), null);
+
+        var expiresAt = dateTimeProvider.UtcNow + options.Value.DownloadUrlLifetime;
+        var download = new FileDownload(
+            file.ContentType,
+            GetContentDisposition(attachment, downloadFileName ?? file.FileName),
+            expiresAt);
+
+        var url = await buckets.For(file.Location).GetDownloadUrl(file.StorageKey, download);
+
+        return new FileDownloadLocation(details, url, null, expiresAt);
     }
 
     public async Task<FileDeleteResult> DeleteAsync(
@@ -479,6 +467,20 @@ public sealed class FilesService(
         }
 
         return name;
+    }
+
+    /// <summary>
+    /// <c>inline</c>, or <c>attachment</c> with the name in both forms browsers read (ASCII and RFC 5987 UTF-8).
+    /// </summary>
+    private static string GetContentDisposition(bool attachment, string fileName)
+    {
+        if (!attachment)
+            return "inline";
+
+        var value = new ContentDispositionHeaderValue("attachment");
+        value.SetHttpFileName(NormalizeFileName(fileName));
+
+        return value.ToString();
     }
 
     private static string GetOriginalKey(Guid fileId) => $"files/{fileId:N}";

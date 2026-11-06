@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+import "google/protobuf/timestamp.proto";
+
 option csharp_namespace = "Laraue.Apps.Storage.Internal.Contracts";
 package laraue.apps.storage.internal.v1;
 
@@ -24,10 +26,11 @@ service StorageService {
   // A file's name, type and size. NOT_FOUND for an unknown or deleted file.
   rpc GetFile (GetFileRequest) returns (StoredFile);
 
-  // Streams a file's content, or the byte range asked for. The first message carries only the
-  // header, the rest only data. NOT_FOUND for an unknown file, OUT_OF_RANGE for a range starting
-  // past the end.
-  rpc ReadFile (ReadFileRequest) returns (stream ReadFileResponse);
+  // Where the caller sends its client for the file's bytes - they never pass through gRPC. An
+  // original gets a short-lived signed bucket link to redirect to (the bucket serves byte ranges
+  // itself); a preview on this server's disk gets a path for the web server to serve (nginx
+  // X-Accel-Redirect). NOT_FOUND for an unknown file.
+  rpc GetDownloadUrl (GetDownloadUrlRequest) returns (GetDownloadUrlResponse);
 
   // Drops one reference to a file (the one an upload returned). When none is left, the file and
   // its preview are deleted and the owner's usage goes down. Deleting an unknown file is not an
@@ -105,29 +108,27 @@ message GetFileRequest {
   string file_id = 1;
 }
 
-message ReadFileRequest {
+message GetDownloadUrlRequest {
   string file_id = 1;
-  // A single HTTP-style byte range: from-to, from- (to unset) or the last suffix_length bytes.
-  // Leave all unset for the whole file.
-  optional int64 range_from = 2;
-  optional int64 range_to = 3;
-  optional int64 suffix_length = 4;
+  // Whether the client should save the file (Content-Disposition: attachment) rather than show it
+  // (inline). Only applies to url.
+  bool attachment = 2;
+  // The name to save it as; the stored name when empty. Only applies to url.
+  string download_file_name = 3;
 }
 
-message ReadFileResponse {
-  oneof part {
-    ReadFileHeader header = 1;
-    bytes data = 2;
-  }
-}
-
-message ReadFileHeader {
+message GetDownloadUrlResponse {
   StoredFile file = 1;
-  // The bytes from..to (inclusive) of total_length follow; partial when a range was applied.
-  int64 from = 2;
-  int64 to = 3;
-  int64 total_length = 4;
-  bool partial = 5;
+  oneof location {
+    // Redirect the client here (302) until expires_at. Content-Type and Content-Disposition are
+    // set by the link.
+    string url = 2;
+    // A file under the previews volume, relative to it (e.g. "ab/cd/<id>.webp"), for the web
+    // server to serve from its own mount of that volume.
+    string internal_path = 3;
+  }
+  // When url stops working. Unset for internal_path.
+  google.protobuf.Timestamp expires_at = 4;
 }
 
 message DeleteFileRequest {

@@ -3,6 +3,7 @@ using Grpc.Core.Interceptors;
 using Laraue.Apps.Storage.DataAccess;
 using Laraue.Apps.Storage.Internal.Contracts;
 using Laraue.Apps.Storage.InternalApiHost;
+using Laraue.Apps.Storage.InternalApiServices;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -30,6 +31,8 @@ public class InternalApiTestHost : WebApplicationFactory<Program>
             {
                 ["Bucket:LocalDirectory"] = BucketDirectory,
                 ["Storage:PreviewsDirectory"] = PreviewsDirectory,
+                // TestServer's address: download links are served by the host's local-files endpoint.
+                ["Storage:LocalFilesBaseUrl"] = "http://localhost" + LocalFilesEndpoint.RoutePrefix,
             });
         });
 
