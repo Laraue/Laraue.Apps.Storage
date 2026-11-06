@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using Laraue.Apps.Storage.DataAccess;
 using Laraue.Apps.Storage.DataAccess.Entities;
 using Laraue.Apps.Storage.Services.Buckets;
-using Laraue.Apps.Storage.Services.Cdn;
 using Laraue.Apps.Storage.Services.Previews;
 using Laraue.Apps.Storage.Services.Resources;
 using Laraue.Core.DateTime.Services.Abstractions;
@@ -93,7 +92,6 @@ public interface IFilesService
 public sealed class FilesService(
     DatabaseContext context,
     IFileBucket bucket,
-    ICdnCache cdnCache,
     IPreviewMaker previewMaker,
     IDateTimeProvider dateTimeProvider,
     IOptions<StorageOptions> options,
@@ -472,8 +470,6 @@ public sealed class FilesService(
         if (preview is not null)
             await DeleteContent(preview);
 
-        await PurgeFromCdn(preview is null ? [original] : [original, preview]);
-
         return new ReferenceDeleteResult(true, owner.UsageBytes);
     }
 
@@ -485,7 +481,7 @@ public sealed class FilesService(
             var headers = new FileObjectHeaders(
                 file.ContentType,
                 GetContentDisposition(file.ContentType, file.FileName),
-                ImmutableCacheControl);
+                CacheControl);
             await bucket.Write(file.StorageKey, stream, headers, cancellationToken);
         }
         catch (Exception e) when (e is not OperationCanceledException)
@@ -520,22 +516,6 @@ public sealed class FilesService(
 
         if (!isValid)
             throw new StorageValidationException(Errors.OwnerInvalid);
-    }
-
-    /// <summary>
-    /// The CDN forgets a deleted file at once; browsers that already downloaded it keep their copy.
-    /// </summary>
-    private async Task PurgeFromCdn(IReadOnlyCollection<StoredFile> files)
-    {
-        try
-        {
-            await cdnCache.PurgeAsync(files.Select(x => GetUrl(x.StorageKey)).ToArray(), CancellationToken.None);
-        }
-        catch (Exception e)
-        {
-            metrics.RecordBucketFailure(StorageMetrics.BucketOperations.Purge);
-            logger.LogError(e, "Couldn't purge deleted files {FileIds} from the CDN", files.Select(x => x.Id));
-        }
     }
 
     private string GetUrl(string key) => $"{options.Value.PublicBaseUrl.TrimEnd('/')}/{key}";
@@ -576,9 +556,10 @@ public sealed class FilesService(
     }
 
     /// <summary>
-    /// Objects never change - the key is the file id - so clients and the CDN keep them for a year.
+    /// Browsers and Cloudflare keep a file for a day. It never changes (the key is the file id), but a deleted file
+    /// is still served from a cache until then - nothing is purged, a day is the accepted window.
     /// </summary>
-    private const string ImmutableCacheControl = "public, max-age=31536000, immutable";
+    private const string CacheControl = "public, max-age=86400";
 
     /// <summary>
     /// Images and videos are shown (<c>inline</c>); anything else is saved, as <c>attachment</c> with its name in both

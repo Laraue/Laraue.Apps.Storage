@@ -66,7 +66,8 @@ message StoredFile {
   // Cloudflare, cached at the edge). The file's id is in it and unguessable, which is the only
   // access check - like a caller's own link by file id. Callers redirect to it (302) or use it
   // directly; file bytes never pass through gRPC. Images and videos are served inline, other files
-  // as attachments named file_name. Gone (404) once the file is deleted.
+  // as attachments named file_name. After the file is deleted, caches may still serve it for up to
+  // a day.
   string url = 5;
 }
 

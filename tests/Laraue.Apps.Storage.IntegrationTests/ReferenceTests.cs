@@ -63,7 +63,6 @@ public class ReferenceTests(InternalApiTestHost host) : IClassFixture<InternalAp
         Assert.True(response.FileDeleted);
         Assert.Equal(0, response.OwnerUsageBytes);
         Assert.Equal(0, await testScope.Database.StoredFiles.CountAsync());
-        Assert.Equal([uploaded.File.Url, uploaded.Preview.Url], host.Cdn.PurgedUrls.Order());
         Assert.Empty(Directory.EnumerateFiles(host.BucketDirectory, "*", SearchOption.AllDirectories));
         Assert.Equal(0, (await client.GetUsageAsync(new GetUsageRequest { Owner = TestFiles.Organization() })).UsageBytes);
     }
@@ -81,7 +80,6 @@ public class ReferenceTests(InternalApiTestHost host) : IClassFixture<InternalAp
 
         Assert.False(response.FileDeleted);
         Assert.Equal(6, response.OwnerUsageBytes);
-        Assert.Empty(host.Cdn.PurgedUrls);
         Assert.Equal("shared", System.Text.Encoding.UTF8.GetString(await host.Download(client, first.File.Id)));
 
         var last = await client.DeleteReferenceAsync(new DeleteReferenceRequest { ReferenceId = second.ReferenceId });
@@ -131,7 +129,6 @@ public class ReferenceTests(InternalApiTestHost host) : IClassFixture<InternalAp
         Assert.Equal(1, deleted);
         Assert.Equal(0, await testScope.Database.StoredFiles.CountAsync());
         Assert.Empty(Directory.EnumerateFiles(host.BucketDirectory, "*", SearchOption.AllDirectories));
-        Assert.Equal(2, host.Cdn.PurgedUrls.Count);
         Assert.Equal(0, (await client.GetUsageAsync(new GetUsageRequest { Owner = TestFiles.Organization() })).UsageBytes);
         await Assert.ThrowsAsync<RpcException>(() => client.ConfirmReferenceAsync(
             new ConfirmReferenceRequest { ReferenceId = uploaded.ReferenceId }).ResponseAsync);

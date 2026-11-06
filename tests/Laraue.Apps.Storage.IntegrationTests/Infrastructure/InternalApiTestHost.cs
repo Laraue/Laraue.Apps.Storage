@@ -9,7 +9,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Laraue.Apps.Storage.Services.Buckets;
-using Laraue.Apps.Storage.Services.Cdn;
 using OpenTelemetry.Exporter;
 
 namespace Laraue.Apps.Storage.IntegrationTests.Infrastructure;
@@ -22,8 +21,6 @@ public class InternalApiTestHost : WebApplicationFactory<Program>
     public string BucketDirectory { get; } = Path.Combine(Path.GetTempPath(), "storage-tests", Guid.NewGuid().ToString("N"), "bucket");
 
     public RecordingFileBucket Bucket { get; }
-
-    public RecordingCdnCache Cdn { get; } = new();
 
     public InternalApiTestHost()
     {
@@ -49,8 +46,7 @@ public class InternalApiTestHost : WebApplicationFactory<Program>
 
         // Registered after the host's own, so these win.
         builder.ConfigureServices(services => services
-            .AddSingleton<IFileBucket>(Bucket)
-            .AddSingleton<ICdnCache>(Cdn));
+            .AddSingleton<IFileBucket>(Bucket));
 
         return base.CreateHost(builder);
     }
@@ -89,7 +85,6 @@ public class InternalApiTestHost : WebApplicationFactory<Program>
             Directory.Delete(BucketDirectory, recursive: true);
 
         Bucket.Headers.Clear();
-        Cdn.PurgedUrls.Clear();
 
         return new InternalApiTestHostScope(Services.CreateScope());
     }

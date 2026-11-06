@@ -42,7 +42,7 @@ public class FileUrlTests(InternalApiTestHost host) : IClassFixture<InternalApiT
     }
 
     [Fact]
-    public async Task UploadFile_ShouldStoreImageInlineAndCachedForAYear_WhenImageIsUploaded()
+    public async Task UploadFile_ShouldStoreImageInlineAndCachedForADay_WhenImageIsUploaded()
     {
         using var testScope = host.CreateTestScope();
         var client = host.CreateStorageClient();
@@ -53,7 +53,7 @@ public class FileUrlTests(InternalApiTestHost host) : IClassFixture<InternalApiT
         var preview = host.Bucket.Headers[$"previews/{Guid.Parse(uploaded.Preview.Id):N}.webp"];
         Assert.Equal("image/png", original.ContentType);
         Assert.Equal("inline", original.ContentDisposition);
-        Assert.Equal("public, max-age=31536000, immutable", original.CacheControl);
+        Assert.Equal("public, max-age=86400", original.CacheControl);
         Assert.Equal("image/webp", preview.ContentType);
         Assert.Equal("inline", preview.ContentDisposition);
     }

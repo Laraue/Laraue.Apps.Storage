@@ -24,13 +24,13 @@ public class S3FileBucketTests
         var request = bucket.CreatePutRequest(
             "files/abc",
             content,
-            new FileObjectHeaders("application/pdf", "attachment; filename=report.pdf", "public, max-age=31536000, immutable"));
+            new FileObjectHeaders("application/pdf", "attachment; filename=report.pdf", "public, max-age=86400"));
 
         Assert.Equal("laraue-files", request.BucketName);
         Assert.Equal("files/abc", request.Key);
         Assert.Equal("application/pdf", request.ContentType);
         Assert.Equal("attachment; filename=report.pdf", request.Headers.ContentDisposition);
-        Assert.Equal("public, max-age=31536000, immutable", request.Headers.CacheControl);
+        Assert.Equal("public, max-age=86400", request.Headers.CacheControl);
         Assert.False(request.UseChunkEncoding);
     }
 }

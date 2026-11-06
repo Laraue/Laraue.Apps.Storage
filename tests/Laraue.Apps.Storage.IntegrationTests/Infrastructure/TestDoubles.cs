@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using Laraue.Apps.Storage.Services.Buckets;
-using Laraue.Apps.Storage.Services.Cdn;
 
 namespace Laraue.Apps.Storage.IntegrationTests.Infrastructure;
 
@@ -20,20 +19,4 @@ public sealed class RecordingFileBucket(string directory) : IFileBucket
     }
 
     public Task Delete(string key, CancellationToken cancellationToken) => _inner.Delete(key, cancellationToken);
-}
-
-/// <summary>
-/// Stands in for Cloudflare: remembers the URLs it was asked to purge.
-/// </summary>
-public sealed class RecordingCdnCache : ICdnCache
-{
-    public ConcurrentQueue<string> PurgedUrls { get; } = new();
-
-    public Task PurgeAsync(IReadOnlyCollection<string> urls, CancellationToken cancellationToken)
-    {
-        foreach (var url in urls)
-            PurgedUrls.Enqueue(url);
-
-        return Task.CompletedTask;
-    }
 }
