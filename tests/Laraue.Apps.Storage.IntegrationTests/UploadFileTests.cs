@@ -110,8 +110,9 @@ public class UploadFileTests(InternalApiTestHost host) : IClassFixture<InternalA
         Assert.Equal(first.Uploaded.Preview.Id, second.Uploaded.Preview.Id);
         Assert.Equal(first.Uploaded.OwnerUsageBytes, second.Uploaded.OwnerUsageBytes);
 
-        var original = await testScope.Database.StoredFiles.SingleAsync(x => x.Kind == Domain.StoredFileKind.Original);
-        Assert.Equal(2, original.References);
+        Assert.NotEqual(first.Uploaded.ReferenceId, second.Uploaded.ReferenceId);
+        Assert.Equal(2, await testScope.Database.FileReferences.CountAsync());
+        Assert.Equal(1, await testScope.Database.StoredFiles.CountAsync(x => x.Kind == Domain.StoredFileKind.Original));
     }
 
     [Fact]

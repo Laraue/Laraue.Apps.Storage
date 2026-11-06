@@ -11,3 +11,9 @@ public sealed class StorageValidationException(string message) : Exception(messa
 /// No such file for the calling service - <c>NOT_FOUND</c>.
 /// </summary>
 public sealed class StoredFileNotFoundException(Guid fileId) : Exception(string.Format(Errors.FileNotFound, fileId));
+
+/// <summary>
+/// No such file reference for the calling service (never was, or deleted) - <c>NOT_FOUND</c>.
+/// </summary>
+public sealed class FileReferenceNotFoundException(Guid referenceId)
+    : Exception(string.Format(Errors.FileReferenceNotFound, referenceId));

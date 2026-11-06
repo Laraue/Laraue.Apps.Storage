@@ -89,6 +89,12 @@ namespace Laraue.Apps.Storage.Services.Resources {
             }
         }
 
+        internal static string FileReferenceNotFound {
+            get {
+                return ResourceManager.GetString("FileReferenceNotFound", resourceCulture);
+            }
+        }
+
         internal static string FileNotFound {
             get {
                 return ResourceManager.GetString("FileNotFound", resourceCulture);

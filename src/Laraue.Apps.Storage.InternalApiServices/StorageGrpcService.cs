@@ -81,18 +81,35 @@ public sealed class StorageGrpcService(IFilesService filesService)
         };
     }
 
-    public override async Task<Contracts.DeleteFileResponse> DeleteFile(
-        Contracts.DeleteFileRequest request,
+    public override async Task<Contracts.ConfirmReferenceResponse> ConfirmReference(
+        Contracts.ConfirmReferenceRequest request,
         ServerCallContext context)
     {
         var serviceId = ReadDomainServiceId(context);
-        var fileId = ParseFileId(request.FileId);
+        var referenceId = ParseId(request.ReferenceId, "reference");
 
-        var result = await ExecuteAsync(() => filesService.DeleteAsync(serviceId, fileId, context.CancellationToken));
-
-        return new Contracts.DeleteFileResponse
+        await ExecuteAsync(async () =>
         {
-            Deleted = result.Deleted,
+            await filesService.ConfirmReferenceAsync(serviceId, referenceId, context.CancellationToken);
+            return true;
+        });
+
+        return new Contracts.ConfirmReferenceResponse();
+    }
+
+    public override async Task<Contracts.DeleteReferenceResponse> DeleteReference(
+        Contracts.DeleteReferenceRequest request,
+        ServerCallContext context)
+    {
+        var serviceId = ReadDomainServiceId(context);
+        var referenceId = ParseId(request.ReferenceId, "reference");
+
+        var result = await ExecuteAsync(
+            () => filesService.DeleteReferenceAsync(serviceId, referenceId, context.CancellationToken));
+
+        return new Contracts.DeleteReferenceResponse
+        {
+            FileDeleted = result.FileDeleted,
             OwnerUsageBytes = result.OwnerUsageBytes,
         };
     }
@@ -122,6 +139,10 @@ public sealed class StorageGrpcService(IFilesService filesService)
         {
             throw new RpcException(new Status(StatusCode.NotFound, e.Message));
         }
+        catch (FileReferenceNotFoundException e)
+        {
+            throw new RpcException(new Status(StatusCode.NotFound, e.Message));
+        }
     }
 
     private static OwnerRef ToOwnerRef(Contracts.Owner? owner) => owner?.KindCase switch
@@ -138,6 +159,7 @@ public sealed class StorageGrpcService(IFilesService filesService)
         var result = new Contracts.UploadedFile
         {
             File = ToContractFile(uploaded.File),
+            ReferenceId = uploaded.ReferenceId.ToString(),
             OwnerUsageBytes = uploaded.OwnerUsageBytes,
             Deduplicated = uploaded.Deduplicated,
         };
@@ -156,11 +178,13 @@ public sealed class StorageGrpcService(IFilesService filesService)
         Size = file.Size,
     };
 
-    private static Guid ParseFileId(string fileId)
+    private static Guid ParseFileId(string fileId) => ParseId(fileId, "file");
+
+    private static Guid ParseId(string id, string what)
     {
-        return Guid.TryParse(fileId, out var parsed)
+        return Guid.TryParse(id, out var parsed)
             ? parsed
-            : throw new RpcException(new Status(StatusCode.InvalidArgument, $"Invalid file id '{fileId}'."));
+            : throw new RpcException(new Status(StatusCode.InvalidArgument, $"Invalid {what} id '{id}'."));
     }
 
     private static Guid? ParseOptionalUserId(string userId)

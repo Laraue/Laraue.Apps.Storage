@@ -22,6 +22,40 @@ namespace Laraue.Apps.Storage.DataAccess.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Laraue.Apps.Storage.DataAccess.Entities.FileReference", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime?>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("confirmed_at");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("FileId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("file_id");
+
+                    b.Property<int>("State")
+                        .HasColumnType("integer")
+                        .HasColumnName("state");
+
+                    b.HasKey("Id")
+                        .HasName("pk_file_references");
+
+                    b.HasIndex("FileId")
+                        .HasDatabaseName("ix_file_references_file_id");
+
+                    b.HasIndex("State", "CreatedAt")
+                        .HasDatabaseName("ix_file_references_state_created_at");
+
+                    b.ToTable("file_references", (string)null);
+                });
+
             modelBuilder.Entity("Laraue.Apps.Storage.DataAccess.Entities.Owner", b =>
                 {
                     b.Property<long>("Id")
@@ -134,10 +168,6 @@ namespace Laraue.Apps.Storage.DataAccess.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("owner_id");
 
-                    b.Property<int>("References")
-                        .HasColumnType("integer")
-                        .HasColumnName("references");
-
                     b.Property<long>("Size")
                         .HasColumnType("bigint")
                         .HasColumnName("size");
@@ -211,6 +241,18 @@ namespace Laraue.Apps.Storage.DataAccess.Migrations
                     b.HasDiscriminator().HasValue(2);
                 });
 
+            modelBuilder.Entity("Laraue.Apps.Storage.DataAccess.Entities.FileReference", b =>
+                {
+                    b.HasOne("Laraue.Apps.Storage.DataAccess.Entities.StoredFile", "File")
+                        .WithMany("References")
+                        .HasForeignKey("FileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_file_references_stored_files_file_id");
+
+                    b.Navigation("File");
+                });
+
             modelBuilder.Entity("Laraue.Apps.Storage.DataAccess.Entities.Owner", b =>
                 {
                     b.HasOne("Laraue.Apps.Storage.DataAccess.Entities.Service", "Service")
@@ -246,6 +288,8 @@ namespace Laraue.Apps.Storage.DataAccess.Migrations
             modelBuilder.Entity("Laraue.Apps.Storage.DataAccess.Entities.StoredFile", b =>
                 {
                     b.Navigation("Preview");
+
+                    b.Navigation("References");
                 });
 #pragma warning restore 612, 618
         }

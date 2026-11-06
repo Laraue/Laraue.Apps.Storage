@@ -15,11 +15,11 @@ small public web host for files on the server's disk. See "Downloads".
 **Stage 1 (BRD-339)**: internal gRPC only (`Protos/storage.proto`, `StorageService`).
 - `UploadFile(owner, user_id?, file_name, content_type, content, quota_bytes?)`, where `owner` is an
   `Owner` message (a oneof of `organization_id` or `user_id`) -> the stored file,
-  its preview for an image, the owner's usage after the upload, and whether it was a duplicate - or
-  `quota_exceeded` (usage, quota, required bytes) with nothing stored.
+  its preview for an image, a new pending `reference_id`, the owner's usage after the upload, and
+  whether it was a duplicate - or `quota_exceeded` (usage, quota, required bytes) with nothing stored.
+- `ConfirmReference(reference_id)`, `DeleteReference(reference_id)` - see "References".
 - `GetFile(file_id)`, `GetDownloadUrl(file_id, attachment, download_file_name?)` (a signed link to
-  redirect to - see "Downloads"),
-  `DeleteFile(file_id)`, `GetUsage(owner)`.
+  redirect to - see "Downloads"), `GetUsage(owner)`.
 - Every call needs the `x-laraue-service-id` header, and a service only sees its own files: another
   service's file id is `NOT_FOUND`.
 
@@ -49,15 +49,35 @@ small public web host for files on the server's disk. See "Downloads".
   - `Kind` `Original` (in the bucket, `files/<id>`) or `Preview` (on local disk under
     `Storage:PreviewsDirectory`, sharded by the id's last characters, `<id>.webp`).
   - `ContentHash` - SHA-256 of an original, to find the same upload for the same owner.
-  - `References` - how many uploads returned this original and haven't been deleted. A duplicate
-    upload adds one and stores nothing; `DeleteFile` drops one and deletes the file and its preview
-    only at zero. So a caller deletes once per upload it made, without tracking duplicates itself.
+  - `References` - its `FileReference` rows, one per upload (see "References"). The file and its
+    preview are deleted with the last one.
   - `SourceFileId` - a preview's original (one preview per original, deleted with it).
   - `UploadedByUserId` - the global Laraue user id (Identity) of whoever uploaded it first, for audit
     only. This service doesn't call Identity.
+- `FileReference` (table `file_references`) - one upload's use of an original, id a UUIDv7,
+  `Pending` or `Confirmed`.
 - `Service` - a consuming app (`LaraueBoards`), seeded via `HasData` from `Data/ServicesData.cs`,
   same as Feedback. Adding a caller means a new enum value, a `ServicesData` entry, a migration and a
   matching value in the proto's `ServiceId`.
+
+## References
+
+Uploading and saving the caller's own link (Boards' attachment) can't be one transaction across two
+services. So every upload returns a reference of its own, and the caller owns its life:
+1. `UploadFile` adds a **pending** reference (a duplicate too - each upload gets its own).
+2. The caller saves its link, then calls `ConfirmReference`. Confirming twice is a no-op.
+3. `DeleteReference` deletes exactly that reference; deleting it again, or an unknown one, is a no-op,
+   so the caller can retry after a timeout without dropping someone else's reference to a shared file.
+   The file and its preview go with the last reference, and the owner's usage goes down.
+4. `PendingReferencesCleaner` (background, every 10 minutes, `InternalApiHost`) deletes references
+   still pending after `Storage:PendingReferenceLifetime` (24 h): uploads whose caller failed before
+   saving its link. A pending upload counts toward the quota until then, so not confirming isn't a way
+   around the limit.
+
+The caller should record "confirm X" / "delete X" in its own transaction (an outbox) and retry them
+until they succeed: a link saved but never confirmed would lose its file after 24 h. Deletes and the
+cleaner lock the owner row and re-read the reference under the lock, so a reference confirmed while
+the cleaner runs is kept.
 
 ## Quota
 

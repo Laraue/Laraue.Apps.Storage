@@ -40,12 +40,17 @@ public sealed record FileDetails(Guid Id, string FileName, string ContentType, l
 
 public abstract record UploadResult;
 
-public sealed record FileUploaded(FileDetails File, FileDetails? Preview, long OwnerUsageBytes, bool Deduplicated)
+public sealed record FileUploaded(
+    FileDetails File,
+    FileDetails? Preview,
+    Guid ReferenceId,
+    long OwnerUsageBytes,
+    bool Deduplicated)
     : UploadResult;
 
 public sealed record QuotaExceeded(long OwnerUsageBytes, long QuotaBytes, long RequiredBytes) : UploadResult;
 
-public sealed record FileDeleteResult(bool Deleted, long OwnerUsageBytes);
+public sealed record ReferenceDeleteResult(bool FileDeleted, long OwnerUsageBytes);
 
 /// <summary>
 /// Where a client downloads a file: redirect to <see cref="Url"/> until <see cref="ExpiresAt"/>.
@@ -55,8 +60,8 @@ public sealed record FileDownloadLocation(FileDetails File, string Url, DateTime
 public interface IFilesService
 {
     /// <summary>
-    /// Stores a file for <see cref="UploadData.Owner"/>, or adds a reference to the same content already stored
-    /// for it. Throws <see cref="StorageValidationException"/> for an invalid request.
+    /// Stores a file for <see cref="UploadData.Owner"/>, or reuses the same content already stored for it, and adds
+    /// a pending reference to it. Throws <see cref="StorageValidationException"/> for an invalid request.
     /// </summary>
     Task<UploadResult> UploadAsync(ServiceId serviceId, UploadData data, CancellationToken cancellationToken);
 
@@ -77,10 +82,26 @@ public interface IFilesService
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Drops one reference to an original; deletes it and its preview when none is left. An unknown file or a
-    /// preview id changes nothing.
+    /// Confirms a pending reference; a confirmed one stays as it is. Throws
+    /// <see cref="FileReferenceNotFoundException"/> when it doesn't exist (any more).
     /// </summary>
-    Task<FileDeleteResult> DeleteAsync(ServiceId serviceId, Guid fileId, CancellationToken cancellationToken);
+    Task ConfirmReferenceAsync(ServiceId serviceId, Guid referenceId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Deletes a reference; deletes its file and preview when it was the last one. An unknown reference changes
+    /// nothing, so retries are safe.
+    /// </summary>
+    Task<ReferenceDeleteResult> DeleteReferenceAsync(
+        ServiceId serviceId,
+        Guid referenceId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Deletes up to <paramref name="batchSize"/> references still pending after
+    /// <see cref="StorageOptions.PendingReferenceLifetime"/> (their files too when nothing else uses them) and
+    /// returns how many. For every service.
+    /// </summary>
+    Task<int> DeleteExpiredPendingReferencesAsync(int batchSize, CancellationToken cancellationToken);
 
     Task<long> GetUsageAsync(ServiceId serviceId, OwnerRef owner, CancellationToken cancellationToken);
 }
@@ -127,9 +148,11 @@ public sealed class FilesService(
             .Include(x => x.Preview)
             .FirstOrDefaultAsync(cancellationToken);
 
+        var now = dateTimeProvider.UtcNow;
+
         if (existing is not null)
         {
-            existing.References++;
+            var reference = AddPendingReference(existing.Id, now);
             await context.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             metrics.RecordUpload(StorageMetrics.UploadResults.Deduplicated);
@@ -137,6 +160,7 @@ public sealed class FilesService(
             return new FileUploaded(
                 ToDetails(existing),
                 existing.Preview is null ? null : ToDetails(existing.Preview),
+                reference.Id,
                 owner.UsageBytes,
                 Deduplicated: true);
         }
@@ -152,7 +176,6 @@ public sealed class FilesService(
             return new QuotaExceeded(owner.UsageBytes, quota, requiredBytes);
         }
 
-        var now = dateTimeProvider.UtcNow;
         var original = new StoredFile
         {
             Id = Guid.CreateVersion7(),
@@ -164,7 +187,6 @@ public sealed class FilesService(
             ContentType = contentType,
             Size = data.Content.Length,
             ContentHash = contentHash,
-            References = 1,
             UploadedByUserId = data.UserId,
             CreatedAt = now,
         };
@@ -190,6 +212,7 @@ public sealed class FilesService(
             previewFile.StorageKey = GetPreviewKey(previewFile.Id);
         }
 
+        FileReference newReference;
         await WriteContent(original, data.Content, cancellationToken);
         try
         {
@@ -199,6 +222,8 @@ public sealed class FilesService(
             context.StoredFiles.Add(original);
             if (previewFile is not null)
                 context.StoredFiles.Add(previewFile);
+
+            newReference = AddPendingReference(original.Id, now);
 
             owner.UsageBytes += requiredBytes;
             await context.SaveChangesAsync(cancellationToken);
@@ -219,6 +244,7 @@ public sealed class FilesService(
         return new FileUploaded(
             ToDetails(original),
             previewFile is null ? null : ToDetails(previewFile),
+            newReference.Id,
             owner.UsageBytes,
             Deduplicated: false);
     }
@@ -262,61 +288,69 @@ public sealed class FilesService(
         return new FileDownloadLocation(details, url, expiresAt);
     }
 
-    public async Task<FileDeleteResult> DeleteAsync(
+    public async Task ConfirmReferenceAsync(
         ServiceId serviceId,
-        Guid fileId,
+        Guid referenceId,
         CancellationToken cancellationToken)
     {
-        var file = await context.StoredFiles
-            .Where(x => x.Id == fileId)
-            .Where(x => x.Owner!.ServiceId == serviceId)
-            .Select(x => new { x.OwnerId, x.Kind, x.Owner!.UsageBytes })
+        var reference = await context.FileReferences
+            .Where(x => x.Id == referenceId)
+            .Where(x => x.File!.Owner!.ServiceId == serviceId)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new FileReferenceNotFoundException(referenceId);
+
+        if (reference.State == FileReferenceState.Confirmed)
+            return;
+
+        reference.State = FileReferenceState.Confirmed;
+        reference.ConfirmedAt = dateTimeProvider.UtcNow;
+        await context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<ReferenceDeleteResult> DeleteReferenceAsync(
+        ServiceId serviceId,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+    {
+        var reference = await context.FileReferences
+            .Where(x => x.Id == referenceId)
+            .Where(x => x.File!.Owner!.ServiceId == serviceId)
+            .Select(x => new { x.File!.OwnerId, x.File.Owner!.UsageBytes })
             .FirstOrDefaultAsync(cancellationToken);
 
-        if (file is null)
-            return new FileDeleteResult(false, 0);
+        if (reference is null)
+            return new ReferenceDeleteResult(false, 0);
 
-        if (file.Kind != StoredFileKind.Original)
-            return new FileDeleteResult(false, file.UsageBytes);
+        return await DeleteReference(referenceId, reference.OwnerId, cancellationToken);
+    }
 
-        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-        var owner = await context.Owners
-            .FromSqlInterpolated($"select * from owners where id = {file.OwnerId} for update")
-            .AsTracking()
-            .FirstOrDefaultAsync(cancellationToken);
+    public async Task<int> DeleteExpiredPendingReferencesAsync(int batchSize, CancellationToken cancellationToken)
+    {
+        var createdBefore = dateTimeProvider.UtcNow - options.Value.PendingReferenceLifetime;
 
-        // Read again under the owner's lock: a concurrent delete may have dropped it already.
-        var original = await context.StoredFiles
-            .Include(x => x.Preview)
-            .FirstOrDefaultAsync(x => x.Id == fileId, cancellationToken);
+        var expired = await context.FileReferences
+            .Where(x => x.State == FileReferenceState.Pending)
+            .Where(x => x.CreatedAt < createdBefore)
+            .OrderBy(x => x.CreatedAt)
+            .Take(batchSize)
+            .Select(x => new { x.Id, x.File!.OwnerId })
+            .ToListAsync(cancellationToken);
 
-        if (original is null || owner is null)
-            return new FileDeleteResult(false, owner?.UsageBytes ?? 0);
-
-        original.References--;
-        if (original.References > 0)
+        var deleted = 0;
+        foreach (var reference in expired)
         {
-            await context.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+            // Under the owner's lock, so a reference confirmed meanwhile is kept.
+            var result = await DeleteReference(
+                reference.Id,
+                reference.OwnerId,
+                cancellationToken,
+                onlyIfPending: true);
 
-            return new FileDeleteResult(false, owner.UsageBytes);
+            if (result is not null)
+                deleted++;
         }
 
-        var preview = original.Preview;
-        owner.UsageBytes = Math.Max(0, owner.UsageBytes - original.Size - (preview?.Size ?? 0));
-        if (preview is not null)
-            context.StoredFiles.Remove(preview);
-
-        context.StoredFiles.Remove(original);
-        await context.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-
-        // After the commit: if this fails, the bytes are left behind but nothing refers to them any more.
-        await DeleteContent(original);
-        if (preview is not null)
-            await DeleteContent(preview);
-
-        return new FileDeleteResult(true, owner.UsageBytes);
+        return deleted;
     }
 
     public async Task<long> GetUsageAsync(ServiceId serviceId, OwnerRef owner, CancellationToken cancellationToken)
@@ -393,6 +427,97 @@ public sealed class FilesService(
             default:
                 throw new ArgumentOutOfRangeException(nameof(owner), owner, null);
         }
+    }
+
+    private FileReference AddPendingReference(Guid fileId, DateTime now)
+    {
+        var reference = new FileReference
+        {
+            Id = Guid.CreateVersion7(),
+            FileId = fileId,
+            State = FileReferenceState.Pending,
+            CreatedAt = now,
+        };
+        context.FileReferences.Add(reference);
+
+        return reference;
+    }
+
+    /// <summary>
+    /// Deletes the reference under its owner's lock, and its file and preview when no other reference is left.
+    /// Returns null when there was nothing to delete (already gone, or confirmed while <paramref name="onlyIfPending"/>).
+    /// </summary>
+    private async Task<ReferenceDeleteResult> DeleteReference(
+        Guid referenceId,
+        long ownerId,
+        CancellationToken cancellationToken)
+    {
+        return await DeleteReference(referenceId, ownerId, cancellationToken, onlyIfPending: false)
+            ?? new ReferenceDeleteResult(false, await context.Owners
+                .Where(x => x.Id == ownerId)
+                .Select(x => x.UsageBytes)
+                .FirstOrDefaultAsync(cancellationToken));
+    }
+
+    private async Task<ReferenceDeleteResult?> DeleteReference(
+        Guid referenceId,
+        long ownerId,
+        CancellationToken cancellationToken,
+        bool onlyIfPending)
+    {
+        // The owner row must be read fresh under the lock: an entity tracked from an earlier call on this context
+        // (the cleaner deletes many references in a row) would be returned with its old usage.
+        context.ChangeTracker.Clear();
+
+        await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+        var owner = await context.Owners
+            .FromSqlInterpolated($"select * from owners where id = {ownerId} for update")
+            .AsTracking()
+            .FirstAsync(cancellationToken);
+
+        // Read again under the lock: a concurrent delete or confirm may have changed it.
+        var reference = await context.FileReferences
+            .AsTracking()
+            .FirstOrDefaultAsync(x => x.Id == referenceId, cancellationToken);
+
+        if (reference is null || onlyIfPending && reference.State != FileReferenceState.Pending)
+            return null;
+
+        context.FileReferences.Remove(reference);
+
+        var othersLeft = await context.FileReferences
+            .Where(x => x.FileId == reference.FileId)
+            .Where(x => x.Id != referenceId)
+            .AnyAsync(cancellationToken);
+
+        if (othersLeft)
+        {
+            await context.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            return new ReferenceDeleteResult(false, owner.UsageBytes);
+        }
+
+        var original = await context.StoredFiles
+            .AsTracking()
+            .Include(x => x.Preview)
+            .FirstAsync(x => x.Id == reference.FileId, cancellationToken);
+
+        var preview = original.Preview;
+        owner.UsageBytes = Math.Max(0, owner.UsageBytes - original.Size - (preview?.Size ?? 0));
+        if (preview is not null)
+            context.StoredFiles.Remove(preview);
+
+        context.StoredFiles.Remove(original);
+        await context.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        // After the commit: if this fails, the bytes are left behind but nothing refers to them any more.
+        await DeleteContent(original);
+        if (preview is not null)
+            await DeleteContent(preview);
+
+        return new ReferenceDeleteResult(true, owner.UsageBytes);
     }
 
     private IFileBucket BucketFor(StoredFileLocation location) => location switch

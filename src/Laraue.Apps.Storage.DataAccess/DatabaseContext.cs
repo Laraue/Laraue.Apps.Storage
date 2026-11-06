@@ -14,6 +14,7 @@ public class DatabaseContext : DbContext
     public required DbSet<Service> Services { get; set; }
     public required DbSet<Owner> Owners { get; set; }
     public required DbSet<StoredFile> StoredFiles { get; set; }
+    public required DbSet<FileReference> FileReferences { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -64,6 +65,18 @@ public class DatabaseContext : DbContext
                 .HasForeignKey<StoredFile>(x => x.SourceFileId)
                 .OnDelete(DeleteBehavior.Cascade);
             builder.HasIndex(x => new { x.OwnerId, x.ContentHash });
+        });
+
+        modelBuilder.Entity<FileReference>(builder =>
+        {
+            builder.Property(x => x.Id).ValueGeneratedNever();
+            builder
+                .HasOne(x => x.File)
+                .WithMany(x => x.References)
+                .HasForeignKey(x => x.FileId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // PendingReferencesCleaner: the oldest pending ones.
+            builder.HasIndex(x => new { x.State, x.CreatedAt });
         });
     }
 }

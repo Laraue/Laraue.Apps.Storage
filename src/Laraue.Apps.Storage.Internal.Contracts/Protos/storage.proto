@@ -17,11 +17,18 @@ package laraue.apps.storage.internal.v1;
 // is the stored size of its files (originals plus previews); this service doesn't know the owner's
 // limit, the caller passes it with each upload.
 service StorageService {
-  // Stores a file for an owner and returns it, with a preview for an image. The same content
-  // uploaded again for the same owner isn't stored twice: the existing file is returned and gains
-  // a reference, and DeleteFile removes it only when the last reference is gone. A file over the
-  // size this service accepts, an empty file or a missing owner is INVALID_ARGUMENT.
+  // Stores a file for an owner and returns it, with a preview for an image, and a new reference to
+  // it (reference_id). The same content uploaded again for the same owner isn't stored twice: the
+  // existing file is returned with a new reference of its own. The reference starts pending: the
+  // caller confirms it (ConfirmReference) once it has saved its own link to the file, and a
+  // reference left pending for a day is deleted - so an upload the caller failed to save doesn't
+  // take space forever. A file over the size this service accepts, an empty file or a missing
+  // owner is INVALID_ARGUMENT.
   rpc UploadFile (UploadFileRequest) returns (UploadFileResponse);
+
+  // Marks a reference as kept by the caller. Confirming it again is a no-op. NOT_FOUND when it's
+  // unknown or was already deleted (e.g. it stayed pending too long) - the caller's link has no file.
+  rpc ConfirmReference (ConfirmReferenceRequest) returns (ConfirmReferenceResponse);
 
   // A file's name, type and size. NOT_FOUND for an unknown or deleted file.
   rpc GetFile (GetFileRequest) returns (StoredFile);
@@ -32,10 +39,10 @@ service StorageService {
   // ranges. NOT_FOUND for an unknown file.
   rpc GetDownloadUrl (GetDownloadUrlRequest) returns (GetDownloadUrlResponse);
 
-  // Drops one reference to a file (the one an upload returned). When none is left, the file and
-  // its preview are deleted and the owner's usage goes down. Deleting an unknown file is not an
-  // error.
-  rpc DeleteFile (DeleteFileRequest) returns (DeleteFileResponse);
+  // Deletes a reference (pending or confirmed). When it was the file's last one, the file and its
+  // preview are deleted and the owner's usage goes down. Deleting an unknown or already deleted
+  // reference is a no-op, so a caller can safely retry.
+  rpc DeleteReference (DeleteReferenceRequest) returns (DeleteReferenceResponse);
 
   // The owner's current usage in bytes.
   rpc GetUsage (GetUsageRequest) returns (GetUsageResponse);
@@ -88,6 +95,9 @@ message UploadFileResponse {
 
 message UploadedFile {
   StoredFile file = 1;
+  // The new reference to the file, pending until ConfirmReference. What the caller keeps next to
+  // the file id and passes to DeleteReference.
+  string reference_id = 5;
   // A smaller image (about 640 px on the long side) for an image upload; unset otherwise, or when
   // the image couldn't be read.
   optional StoredFile preview = 2;
@@ -126,13 +136,20 @@ message GetDownloadUrlResponse {
   google.protobuf.Timestamp expires_at = 3;
 }
 
-message DeleteFileRequest {
-  string file_id = 1;
+message ConfirmReferenceRequest {
+  string reference_id = 1;
 }
 
-message DeleteFileResponse {
-  // Whether the file itself was deleted (its last reference was dropped).
-  bool deleted = 1;
+message ConfirmReferenceResponse {
+}
+
+message DeleteReferenceRequest {
+  string reference_id = 1;
+}
+
+message DeleteReferenceResponse {
+  // Whether the file itself was deleted (this was its last reference).
+  bool file_deleted = 1;
   int64 owner_usage_bytes = 2;
 }
 

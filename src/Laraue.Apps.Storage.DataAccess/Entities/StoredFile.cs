@@ -54,10 +54,10 @@ public class StoredFile
     public StoredFile? Preview { get; set; }
 
     /// <summary>
-    /// How many uploads returned this original and haven't been deleted. The file is deleted when it drops to
-    /// zero. Always 0 for previews, which go with their original.
+    /// The uses of an original (<see cref="FileReference"/>). The file is deleted with the last one. Previews have
+    /// none; they go with their original.
     /// </summary>
-    public int References { get; set; }
+    public ICollection<FileReference> References { get; set; } = [];
 
     /// <summary>
     /// The global Laraue user id of whoever uploaded it first, when the caller said.

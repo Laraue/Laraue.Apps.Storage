@@ -81,8 +81,17 @@ public class InternalApiTestHost : WebApplicationFactory<Program>
         });
     }
 
+    /// <summary>
+    /// Wipes the database and the bucket and previews folders, so a test sees only its own files.
+    /// </summary>
     public InternalApiTestHostScope CreateTestScope()
     {
+        foreach (var directory in new[] { BucketDirectory, PreviewsDirectory })
+        {
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+
         return new InternalApiTestHostScope(Services.CreateScope());
     }
 
@@ -114,6 +123,7 @@ public class InternalApiTestHostScope : IDisposable
     {
         _scope = scope;
         Database.ChangeTracker.QueryTrackingBehavior = QueryTrackingBehavior.NoTracking;
+        Database.FileReferences.ExecuteDelete();
         Database.StoredFiles.Where(x => x.SourceFileId != null).ExecuteDelete();
         Database.StoredFiles.ExecuteDelete();
         Database.Owners.ExecuteDelete();

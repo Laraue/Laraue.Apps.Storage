@@ -64,7 +64,6 @@ namespace Laraue.Apps.Storage.DataAccess.Migrations
                     size = table.Column<long>(type: "bigint", nullable: false),
                     content_hash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
                     source_file_id = table.Column<Guid>(type: "uuid", nullable: true),
-                    references = table.Column<int>(type: "integer", nullable: false),
                     uploaded_by_user_id = table.Column<Guid>(type: "uuid", nullable: true),
                     created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
@@ -85,10 +84,41 @@ namespace Laraue.Apps.Storage.DataAccess.Migrations
                         onDelete: ReferentialAction.Cascade);
                 });
 
+            migrationBuilder.CreateTable(
+                name: "file_references",
+                columns: table => new
+                {
+                    id = table.Column<Guid>(type: "uuid", nullable: false),
+                    file_id = table.Column<Guid>(type: "uuid", nullable: false),
+                    state = table.Column<int>(type: "integer", nullable: false),
+                    created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    confirmed_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("pk_file_references", x => x.id);
+                    table.ForeignKey(
+                        name: "fk_file_references_stored_files_file_id",
+                        column: x => x.file_id,
+                        principalTable: "stored_files",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
             migrationBuilder.InsertData(
                 table: "services",
                 columns: new[] { "id", "code", "name" },
                 values: new object[] { 1, "laraue_boards", "Laraue Boards" });
+
+            migrationBuilder.CreateIndex(
+                name: "ix_file_references_file_id",
+                table: "file_references",
+                column: "file_id");
+
+            migrationBuilder.CreateIndex(
+                name: "ix_file_references_state_created_at",
+                table: "file_references",
+                columns: new[] { "state", "created_at" });
 
             migrationBuilder.CreateIndex(
                 name: "ix_owners_service_id",
@@ -124,6 +154,9 @@ namespace Laraue.Apps.Storage.DataAccess.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropTable(
+                name: "file_references");
+
             migrationBuilder.DropTable(
                 name: "stored_files");
 

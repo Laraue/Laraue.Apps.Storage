@@ -28,6 +28,12 @@ public class StorageOptions
     public TimeSpan DownloadUrlLifetime { get; set; } = TimeSpan.FromMinutes(30);
 
     /// <summary>
+    /// How long a reference may stay pending (uploaded, not confirmed by the caller) before it's deleted with its
+    /// file. Long enough for a caller to retry confirming after an outage of this service.
+    /// </summary>
+    public TimeSpan PendingReferenceLifetime { get; set; } = TimeSpan.FromHours(24);
+
+    /// <summary>
     /// Where the public web host (<c>Laraue.Apps.Storage.WebApiHost</c>) is reached by clients, e.g.
     /// <c>https://files.laraue.com</c>. Links to files on this server's disk (previews, and originals with
     /// <c>Bucket:LocalDirectory</c>) point there. A domain of its own, so an uploaded file never runs as a page on

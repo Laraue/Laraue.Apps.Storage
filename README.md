@@ -7,7 +7,8 @@ the caller passes; the limits themselves stay in the calling app. See [AGENTS.md
 design and what's deliberately *not* built yet.
 
 **Stage 1 (BRD-339)**: internal gRPC `UploadFile`, `GetFile`, `GetDownloadUrl` (a signed link to
-redirect to - file bytes never go out through gRPC), `DeleteFile`, `GetUsage`; and a small public web
+redirect to - file bytes never go out through gRPC), `ConfirmReference`, `DeleteReference`,
+`GetUsage`; and a small public web
 host that serves previews from the server's disk for signed links only.
 
 ## License
