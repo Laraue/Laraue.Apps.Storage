@@ -46,7 +46,8 @@ the app's) and answers them with a redirect to the file's public URL on this ser
   are filtered (`... is not null`), and `FilesService.LockOwner`'s `on conflict` repeats those
   filters - change them together.
 - `StoredFile` (table `stored_files`) - one file, id a UUIDv7:
-  - `Kind` `Original` (bucket key `files/<id>`) or `Preview` (`previews/<id>.webp`). Both live in
+  - `Kind` `Original` or `Preview`. Both are stored under their own id as the key (32 hex digits, no
+    prefix or extension - the type is in the object's headers), and both live in
     the one bucket; nothing is kept on the server's disk.
   - `ContentHash` - SHA-256 of an original, to find the same upload for the same owner.
   - `References` - its `FileReference` rows, one per upload (see "References"). The file and its
@@ -146,10 +147,10 @@ directly, only through its own `Host{Services}` project.
 ## Downloads
 
 Every file has one public, permanent URL: `{Storage:PublicBaseUrl}/{key}`, i.e.
-`https://storage.laraue.com/files/<id>` and `.../previews/<id>.webp`.
+`https://storage.laraue.com/<id>`, for an original and a preview alike.
 - **The public host** (`WebApiHost`) answers it: it streams the object from the **private** bucket with
   a read-only key and the headers stored at upload. It has no database and no gRPC, and serves only keys
-  shaped like a file or a preview (`PublicFilesService`); anything else, a deleted file included, is 404.
+  shaped like a file id (`PublicFilesService`); anything else, a deleted file included, is 404.
   It always sends the whole file.
 - **Cloudflare** proxies `storage.laraue.com` and caches every response for a day (a cache rule makes the
   extension-less originals cacheable too), so only cache misses reach the host and B2. Byte ranges

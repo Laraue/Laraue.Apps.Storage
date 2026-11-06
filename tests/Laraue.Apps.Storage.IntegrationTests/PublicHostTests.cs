@@ -56,13 +56,13 @@ public class PublicHostTests(InternalApiTestHost host) : IClassFixture<InternalA
     }
 
     [Theory]
+    [InlineData("/0123456789abcdef0123456789abcdef")]
+    [InlineData("/0123456789abcdef0123456789abcdef.headers.json")]
+    [InlineData("/0123456789ABCDEF0123456789ABCDEF")]
+    [InlineData("/0123456789abcdef0123456789abcde")]
     [InlineData("/files/0123456789abcdef0123456789abcdef")]
-    [InlineData("/previews/0123456789abcdef0123456789abcdef.webp")]
-    [InlineData("/files/0123456789abcdef0123456789abcdef.headers.json")]
-    [InlineData("/files/NOT-A-FILE-ID")]
-    [InlineData("/previews/0123456789abcdef0123456789abcdef")]
-    [InlineData("/other/0123456789abcdef0123456789abcdef")]
-    [InlineData("/files/..%2F..%2Fetc%2Fpasswd")]
+    [InlineData("/NOT-A-FILE-ID")]
+    [InlineData("/..%2F..%2Fetc%2Fpasswd")]
     public async Task GetFile_ShouldReturnNotFound_WhenKeyIsUnknownOrNotAFile(string path)
     {
         using var testScope = host.CreateTestScope();

@@ -3,8 +3,8 @@ using System.ComponentModel.DataAnnotations;
 namespace Laraue.Apps.Storage.DataAccess.Entities;
 
 /// <summary>
-/// One stored file in the bucket: an uploaded original (<c>files/&lt;id&gt;</c>), or the preview made from an image
-/// (<c>previews/&lt;id&gt;.webp</c>).
+/// One stored file in the bucket: an uploaded original, or the preview made from an image. Both are stored under
+/// their own id (<see cref="StorageKey"/>, the id as 32 hex digits); the type is kept with the object.
 /// </summary>
 public class StoredFile
 {

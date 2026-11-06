@@ -7,8 +7,8 @@ namespace Laraue.Apps.Storage.WebApiServices;
 public interface IPublicFilesService
 {
     /// <summary>
-    /// Opens the object at <paramref name="key"/> when it's a file or preview key (<c>files/&lt;id&gt;</c>,
-    /// <c>previews/&lt;id&gt;.webp</c>) and exists; null otherwise, so nothing else in the bucket is reachable.
+    /// Opens the object at <paramref name="key"/> when it's a file's key (its id as 32 lowercase hex digits) and
+    /// exists; null otherwise, so nothing else in the bucket is reachable.
     /// The caller disposes it.
     /// </summary>
     Task<FileObject?> OpenAsync(string key, CancellationToken cancellationToken);
@@ -36,6 +36,6 @@ public sealed partial class PublicFilesService(IFileBucket bucket, StorageMetric
         return file;
     }
 
-    [GeneratedRegex("^(files/[0-9a-f]{32}|previews/[0-9a-f]{32}\\.webp)$")]
+    [GeneratedRegex("^[0-9a-f]{32}$")]
     private static partial Regex FileKey();
 }

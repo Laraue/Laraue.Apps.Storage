@@ -20,8 +20,8 @@ public class FileUrlTests(InternalApiTestHost host) : IClassFixture<InternalApiT
         var uploaded = (await client.UploadFileAsync(TestFiles.Upload(TestFiles.Png(800, 600), "a.png", "image/png"))).Uploaded;
 
         var baseUrl = new Uri(host.BucketDirectory).AbsoluteUri;
-        Assert.Equal($"{baseUrl}/files/{Guid.Parse(uploaded.File.Id):N}", uploaded.File.Url);
-        Assert.Equal($"{baseUrl}/previews/{Guid.Parse(uploaded.Preview.Id):N}.webp", uploaded.Preview.Url);
+        Assert.Equal($"{baseUrl}/{Guid.Parse(uploaded.File.Id):N}", uploaded.File.Url);
+        Assert.Equal($"{baseUrl}/{Guid.Parse(uploaded.Preview.Id):N}", uploaded.Preview.Url);
         Assert.True(File.Exists(new Uri(uploaded.Preview.Url).LocalPath));
     }
 
@@ -49,8 +49,8 @@ public class FileUrlTests(InternalApiTestHost host) : IClassFixture<InternalApiT
 
         var uploaded = (await client.UploadFileAsync(TestFiles.Upload(TestFiles.Png(800, 600), "a.png", "image/png"))).Uploaded;
 
-        var original = host.Bucket.Headers[$"files/{Guid.Parse(uploaded.File.Id):N}"];
-        var preview = host.Bucket.Headers[$"previews/{Guid.Parse(uploaded.Preview.Id):N}.webp"];
+        var original = host.Bucket.Headers[$"{Guid.Parse(uploaded.File.Id):N}"];
+        var preview = host.Bucket.Headers[$"{Guid.Parse(uploaded.Preview.Id):N}"];
         Assert.Equal("image/png", original.ContentType);
         Assert.Equal("inline", original.ContentDisposition);
         Assert.Equal("public, max-age=86400", original.CacheControl);
@@ -68,7 +68,7 @@ public class FileUrlTests(InternalApiTestHost host) : IClassFixture<InternalApiT
 
         var uploaded = (await client.UploadFileAsync(TestFiles.Upload(TestFiles.Text("content"), fileName, contentType))).Uploaded;
 
-        var headers = host.Bucket.Headers[$"files/{Guid.Parse(uploaded.File.Id):N}"];
+        var headers = host.Bucket.Headers[$"{Guid.Parse(uploaded.File.Id):N}"];
         Assert.Equal($"attachment; filename={fileName}; filename*=UTF-8''{fileName}", headers.ContentDisposition);
     }
 
@@ -81,7 +81,7 @@ public class FileUrlTests(InternalApiTestHost host) : IClassFixture<InternalApiT
         var uploaded = (await client.UploadFileAsync(TestFiles.Upload(TestFiles.Text("content"), "отчёт.pdf", "application/pdf"))).Uploaded;
 
         var disposition = System.Net.Http.Headers.ContentDispositionHeaderValue.Parse(
-            host.Bucket.Headers[$"files/{Guid.Parse(uploaded.File.Id):N}"].ContentDisposition);
+            host.Bucket.Headers[$"{Guid.Parse(uploaded.File.Id):N}"].ContentDisposition);
         Assert.Equal("attachment", disposition.DispositionType);
         Assert.Equal("отчёт.pdf", disposition.FileNameStar);
     }

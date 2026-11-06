@@ -22,12 +22,12 @@ public class S3FileBucketTests
         using var content = new MemoryStream([1, 2, 3]);
 
         var request = bucket.CreatePutRequest(
-            "files/abc",
+            "0123456789abcdef0123456789abcdef",
             content,
             new FileObjectHeaders("application/pdf", "attachment; filename=report.pdf", "public, max-age=86400"));
 
         Assert.Equal("laraue-files", request.BucketName);
-        Assert.Equal("files/abc", request.Key);
+        Assert.Equal("0123456789abcdef0123456789abcdef", request.Key);
         Assert.Equal("application/pdf", request.ContentType);
         Assert.Equal("attachment; filename=report.pdf", request.Headers.ContentDisposition);
         Assert.Equal("public, max-age=86400", request.Headers.CacheControl);

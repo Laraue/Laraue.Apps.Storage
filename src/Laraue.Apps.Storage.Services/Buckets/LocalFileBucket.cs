@@ -16,7 +16,7 @@ public class LocalFileBucket(string directory) : IFileBucket
         var path = GetPath(key);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
-        await using (var fileStream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
+        await using (var fileStream = System.IO.File.Create(path))
             await content.CopyToAsync(fileStream, cancellationToken);
 
         await System.IO.File.WriteAllTextAsync(path + HeadersSuffix, JsonSerializer.Serialize(headers), cancellationToken);
@@ -30,7 +30,7 @@ public class LocalFileBucket(string directory) : IFileBucket
 
         var headers = JsonSerializer.Deserialize<FileObjectHeaders>(
             await System.IO.File.ReadAllTextAsync(path + HeadersSuffix, cancellationToken))!;
-        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+        var stream = System.IO.File.OpenRead(path);
 
         return new FileObject(stream, stream.Length, headers);
     }

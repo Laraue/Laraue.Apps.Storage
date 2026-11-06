@@ -92,7 +92,7 @@ public class UploadFileTests(InternalApiTestHost host) : IClassFixture<InternalA
         Assert.Null(response.Uploaded.Preview);
         Assert.Equal(text.Length, response.Uploaded.OwnerUsageBytes);
         Assert.Equal(1, await testScope.Database.StoredFiles.CountAsync());
-        Assert.True(File.Exists(Path.Combine(host.BucketDirectory, "files", Guid.Parse(response.Uploaded.File.Id).ToString("N"))));
+        Assert.True(File.Exists(Path.Combine(host.BucketDirectory, Guid.Parse(response.Uploaded.File.Id).ToString("N"))));
     }
 
     [Fact]

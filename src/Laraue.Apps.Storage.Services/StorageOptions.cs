@@ -19,7 +19,7 @@ public class StorageOptions
     /// <summary>
     /// Where clients download files: the public host (<c>WebApiHost</c>) behind Cloudflare,
     /// <c>https://storage.laraue.com</c>. A file's URL is this plus its key
-    /// (<c>/files/&lt;id&gt;</c>, <c>/previews/&lt;id&gt;.webp</c>).
+    /// (the file's id, <c>https://storage.laraue.com/&lt;id&gt;</c>).
     /// </summary>
     [Required]
     [Url]
