@@ -1,15 +1,23 @@
+using Laraue.Apps.Storage.DataAccess.Entities;
+using Microsoft.Extensions.DependencyInjection;
+
 namespace Laraue.Apps.Storage.Services.Buckets;
 
 /// <summary>
-/// The two places file bytes are kept: <see cref="Originals"/> (the bucket) and <see cref="Previews"/> (the
-/// local disk).
+/// The two places file bytes are kept, registered as keyed <see cref="IFileBucket"/>s: <see cref="OriginalsKey"/>
+/// (the bucket) and <see cref="PreviewsKey"/> (the local disk).
 /// </summary>
-public sealed record FileBuckets(IFileBucket Originals, IFileBucket Previews)
+public sealed class FileBuckets(
+    [FromKeyedServices(FileBuckets.OriginalsKey)] IFileBucket originals,
+    [FromKeyedServices(FileBuckets.PreviewsKey)] IFileBucket previews)
 {
-    public IFileBucket For(DataAccess.Entities.StoredFileLocation location) => location switch
+    public const string OriginalsKey = "originals";
+    public const string PreviewsKey = "previews";
+
+    public IFileBucket For(StoredFileLocation location) => location switch
     {
-        DataAccess.Entities.StoredFileLocation.Bucket => Originals,
-        DataAccess.Entities.StoredFileLocation.LocalDisk => Previews,
+        StoredFileLocation.Bucket => originals,
+        StoredFileLocation.LocalDisk => previews,
         _ => throw new ArgumentOutOfRangeException(nameof(location), location, null),
     };
 }

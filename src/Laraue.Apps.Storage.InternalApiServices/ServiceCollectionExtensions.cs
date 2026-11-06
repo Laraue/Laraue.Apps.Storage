@@ -27,33 +27,31 @@ public static class ServiceCollectionExtensions
 
             builder.AddValidatedOptions<StorageOptions>("Storage");
 
+            builder.AddValidatedOptions<FileLinkOptions>("FileLinks");
+            builder.Services
+                .AddSingleton<FileLinkSigner>()
+                .AddSingleton<LocalFileLinks>()
+                .AddSingleton<FileBuckets>()
+                .AddKeyedSingleton<IFileBucket>(FileBuckets.PreviewsKey, (sp, _) => new LocalFileBucket(
+                    sp.GetRequiredService<IOptions<StorageOptions>>().Value.PreviewsDirectory,
+                    LocalFileBucket.PreviewsArea,
+                    sp.GetRequiredService<LocalFileLinks>()));
+
             // Originals go to the B2 bucket. Bucket:LocalDirectory (local runs, tests) keeps them in a folder
             // instead, with no credentials needed; it's never set in production.
             var localBucketDirectory = builder.Configuration["Bucket:LocalDirectory"];
             if (string.IsNullOrEmpty(localBucketDirectory))
             {
                 builder.AddValidatedOptions<FileBucketOptions>("Bucket");
-                builder.Services.AddSingleton<S3FileBucket>();
+                builder.Services.AddKeyedSingleton<IFileBucket, S3FileBucket>(FileBuckets.OriginalsKey);
             }
-
-            builder.AddValidatedOptions<FileLinkOptions>("FileLinks");
-            builder.Services.AddSingleton<FileLinkSigner>();
-
-            builder.Services.AddSingleton(sp =>
+            else
             {
-                var links = new LocalFileLinks(
-                    sp.GetRequiredService<FileLinkSigner>(),
-                    sp.GetRequiredService<IOptions<StorageOptions>>().Value.PublicBaseUrl);
-
-                return new FileBuckets(
-                    string.IsNullOrEmpty(localBucketDirectory)
-                        ? sp.GetRequiredService<S3FileBucket>()
-                        : new LocalFileBucket(localBucketDirectory, LocalFileBucket.OriginalsArea, links),
-                    new LocalFileBucket(
-                        sp.GetRequiredService<IOptions<StorageOptions>>().Value.PreviewsDirectory,
-                        LocalFileBucket.PreviewsArea,
-                        links));
-            });
+                builder.Services.AddKeyedSingleton<IFileBucket>(FileBuckets.OriginalsKey, (sp, _) => new LocalFileBucket(
+                    localBucketDirectory,
+                    LocalFileBucket.OriginalsArea,
+                    sp.GetRequiredService<LocalFileLinks>()));
+            }
 
             return builder;
         }

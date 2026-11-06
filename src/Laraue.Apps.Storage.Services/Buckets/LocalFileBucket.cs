@@ -1,4 +1,5 @@
 using Laraue.Apps.Storage.Services.Links;
+using Microsoft.Extensions.Options;
 
 namespace Laraue.Apps.Storage.Services.Buckets;
 
@@ -29,7 +30,7 @@ public class LocalFileBucket(string directory, string area, LocalFileLinks? link
         if (links is null)
             throw new InvalidOperationException("This bucket only serves paths; it can't sign download links.");
 
-        return Task.FromResult(links.Signer.CreateUrl(links.PublicBaseUrl, area, key, download));
+        return Task.FromResult(links.CreateUrl(area, key, download));
     }
 
     public Task Delete(string key, CancellationToken cancellationToken)
@@ -56,6 +57,13 @@ public class LocalFileBucket(string directory, string area, LocalFileLinks? link
 }
 
 /// <summary>
-/// What a <see cref="LocalFileBucket"/> needs to hand out links: the signer and the public web host's address.
+/// Signed links to the public web host (<see cref="StorageOptions.PublicBaseUrl"/>), what a
+/// <see cref="LocalFileBucket"/> hands out.
 /// </summary>
-public sealed record LocalFileLinks(FileLinkSigner Signer, string PublicBaseUrl);
+public sealed class LocalFileLinks(FileLinkSigner signer, IOptions<StorageOptions> options)
+{
+    public string CreateUrl(string area, string key, FileDownload download)
+    {
+        return signer.CreateUrl(options.Value.PublicBaseUrl, area, key, download);
+    }
+}
