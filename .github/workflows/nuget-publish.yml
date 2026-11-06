@@ -1,0 +1,61 @@
+# Packs and publishes every packable project (IsPackable=true - today just
+# Laraue.Apps.Storage.Internal.Contracts) to NuGet.org, independent of the build-and-test
+# pipeline in dotnet.yml. Manual trigger only (workflow_dispatch) - run it from the Actions tab on
+# whichever branch you want to publish from.
+#
+# Versioning: the base <Version> in Directory.Build.props is published as-is from `main`. Any other
+# branch gets `-alpha.<run number>` appended (e.g. 0.0.1-alpha.42) so a service can pull a specific
+# in-progress contract to integrate against before it's merged, without that prerelease ever being
+# picked up by a plain `dotnet add package` (NuGet only resolves prerelease versions when asked to).
+
+name: NuGet Publish
+
+on:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write # enable GitHub OIDC token issuance, needed for NuGet trusted publishing
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Compute package version
+      id: version
+      run: |
+        base_version=$(dotnet msbuild src/Laraue.Apps.Storage.Internal.Contracts/Laraue.Apps.Storage.Internal.Contracts.csproj -getProperty:Version)
+
+        if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          version="$base_version"
+        else
+          version="$base_version-alpha.${{ github.run_number }}"
+        fi
+
+        echo "Publishing version: $version"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - name: Pack
+      run: dotnet pack -c Release -o . -p:Version=${{ steps.version.outputs.version }}
+
+    - name: NuGet login (OIDC -> temp API key)
+      uses: NuGet/login@v1
+      id: nuget-login
+      with:
+        # nuget.org username (profile name), NOT an email address - kept as a secret since it's
+        # part of what nuget.org checks against the trusted publishing policy below.
+        user: ${{ secrets.NUGET_USER }}
+
+    - name: Push to NuGet.org
+      run: dotnet nuget push "*.nupkg" --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} -s https://api.nuget.org/v3/index.json --skip-duplicate

@@ -1,0 +1,38 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>Latest</LangVersion>
+    <Copyright>Ilya Belyanskiy 2026</Copyright>
+    <Authors>Belyansky Ilya</Authors>
+    <PackageProjectUrl>https://github.com/Laraue/Laraue.Apps.Storage</PackageProjectUrl>
+    <!-- Designate all projects as non-package projects by default -->
+    <IsPackable>false</IsPackable>
+    <Version>0.0.1</Version>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <LaraueCoreDataAccessVersion>10.8.0</LaraueCoreDataAccessVersion>
+    <LaraueCoreDateTimeVersion>10.0.0</LaraueCoreDateTimeVersion>
+    <LaraueCoreTestingVersion>10.1.0</LaraueCoreTestingVersion>
+    <EfCoreVersion>10.0.0</EfCoreVersion>
+    <NpgsqlEfCoreVersion>10.0.0</NpgsqlEfCoreVersion>
+    <EfCoreNamingConventionsVersion>10.0.1</EfCoreNamingConventionsVersion>
+    <GrpcAspNetCoreServerVersion>2.66.0</GrpcAspNetCoreServerVersion>
+    <GrpcNetClientVersion>2.66.0</GrpcNetClientVersion>
+    <GrpcToolsVersion>2.66.0</GrpcToolsVersion>
+    <GoogleProtobufVersion>3.28.3</GoogleProtobufVersion>
+    <LaraueGrpcVersion>0.0.3</LaraueGrpcVersion>
+    <OpenTelemetryExtensionsHostingVersion>1.18.0</OpenTelemetryExtensionsHostingVersion>
+    <OpenTelemetryExporterPrometheusAspNetCoreVersion>1.18.0-beta.1</OpenTelemetryExporterPrometheusAspNetCoreVersion>
+    <OpenTelemetryInstrumentationAspNetCoreVersion>1.18.0</OpenTelemetryInstrumentationAspNetCoreVersion>
+    <OpenTelemetryInstrumentationRuntimeVersion>1.18.0</OpenTelemetryInstrumentationRuntimeVersion>
+    <AwsSdkS3Version>4.0.104.10</AwsSdkS3Version>
+    <SkiaSharpVersion>4.154.0</SkiaSharpVersion>
+  </PropertyGroup>
+</Project>

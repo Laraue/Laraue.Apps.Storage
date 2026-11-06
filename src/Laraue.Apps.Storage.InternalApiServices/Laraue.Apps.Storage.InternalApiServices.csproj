@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\Laraue.Apps.Storage.Services\Laraue.Apps.Storage.Services.csproj" />
+      <ProjectReference Include="..\Laraue.Apps.Storage.Internal.Contracts\Laraue.Apps.Storage.Internal.Contracts.csproj" />
+    </ItemGroup>
+
+</Project>

@@ -1,0 +1,144 @@
+syntax = "proto3";
+
+option csharp_namespace = "Laraue.Apps.Storage.Internal.Contracts";
+package laraue.apps.storage.internal.v1;
+
+// Service-to-service contract other Laraue apps call to keep their users' files here.
+//
+// Which service is calling is identified once per client via the "x-laraue-service-id" metadata
+// header (see GrpcHeaders.ServiceIdHeaderName in this package, value = the numeric ServiceId
+// below), not repeated on every request message. Every call requires it, and a service sees only
+// its own files: another service's file id is NOT_FOUND.
+//
+// Files belong to an owner: an organization of the calling service (Boards: the organization the
+// file is uploaded in) or a Laraue user. Owners are separate per calling service. The owner's usage
+// is the stored size of its files (originals plus previews); this service doesn't know the owner's
+// limit, the caller passes it with each upload.
+service StorageService {
+  // Stores a file for an owner and returns it, with a preview for an image, and a new reference to
+  // it (reference_id). The same content uploaded again for the same owner isn't stored twice: the
+  // existing file is returned with a new reference of its own. The reference starts pending: the
+  // caller confirms it (ConfirmReference) once it has saved its own link to the file, and a
+  // reference left pending for a day is deleted - so an upload the caller failed to save doesn't
+  // take space forever. A file over the size this service accepts, an empty file or a missing
+  // owner is INVALID_ARGUMENT.
+  rpc UploadFile (UploadFileRequest) returns (UploadFileResponse);
+
+  // Marks a reference as kept by the caller. Confirming it again is a no-op. NOT_FOUND when it's
+  // unknown or was already deleted (e.g. it stayed pending too long) - the caller's link has no file.
+  rpc ConfirmReference (ConfirmReferenceRequest) returns (ConfirmReferenceResponse);
+
+  // A file's name, type, size and URL. NOT_FOUND for an unknown or deleted file.
+  rpc GetFile (GetFileRequest) returns (StoredFile);
+
+
+  // Deletes a reference (pending or confirmed). When it was the file's last one, the file and its
+  // preview are deleted and the owner's usage goes down. Deleting an unknown or already deleted
+  // reference is a no-op, so a caller can safely retry.
+  rpc DeleteReference (DeleteReferenceRequest) returns (DeleteReferenceResponse);
+
+  // The owner's current usage in bytes.
+  rpc GetUsage (GetUsageRequest) returns (GetUsageResponse);
+}
+
+enum ServiceId {
+  SERVICE_ID_UNSPECIFIED = 0;
+  SERVICE_ID_LARAUE_BOARDS = 1;
+}
+
+// Whoever a file is stored for. Exactly one must be set.
+message Owner {
+  oneof kind {
+    // The calling service's own organization id (Boards: Organization.Id). Greater than zero.
+    int64 organization_id = 1;
+    // The global Laraue user id (from Identity).
+    string user_id = 2;
+  }
+}
+
+message StoredFile {
+  string id = 1;
+  string file_name = 2;
+  string content_type = 3;
+  // Stored size in bytes.
+  int64 size = 4;
+  // Where clients download the file: a public, permanent URL on the files domain (B2 behind
+  // Cloudflare, cached at the edge). The file's id is in it and unguessable, which is the only
+  // access check - like a caller's own link by file id. Callers redirect to it (302) or use it
+  // directly; file bytes never pass through gRPC. Images and videos are served inline, other files
+  // as attachments named file_name. After the file is deleted, caches may still serve it for up to
+  // a day.
+  string url = 5;
+}
+
+message UploadFileRequest {
+  // Whose usage the file counts toward.
+  Owner owner = 1;
+  // The global Laraue user id (from Identity) of whoever uploaded it, kept for audit. Optional.
+  string user_id = 2;
+  string file_name = 3;
+  // What the file is stored and served as. The caller checks the type; this service only uses
+  // the content itself to decide whether it's an image it can make a preview for.
+  string content_type = 4;
+  bytes content = 5;
+  // The owner's limit. When set and the new file (with its preview) would take the owner's usage
+  // over it, nothing is stored and the response is quota_exceeded. A duplicate never exceeds it.
+  optional int64 quota_bytes = 6;
+}
+
+message UploadFileResponse {
+  oneof result {
+    UploadedFile uploaded = 1;
+    QuotaExceeded quota_exceeded = 2;
+  }
+}
+
+message UploadedFile {
+  StoredFile file = 1;
+  // The new reference to the file, pending until ConfirmReference. What the caller keeps next to
+  // the file id and passes to DeleteReference.
+  string reference_id = 5;
+  // A smaller image (about 640 px on the long side) for an image upload; unset otherwise, or when
+  // the image couldn't be read.
+  optional StoredFile preview = 2;
+  // The owner's usage after this upload.
+  int64 owner_usage_bytes = 3;
+  // Whether the content was already stored for this owner and the existing file is returned.
+  bool deduplicated = 4;
+}
+
+message QuotaExceeded {
+  int64 owner_usage_bytes = 1;
+  int64 quota_bytes = 2;
+  // What the upload would have added.
+  int64 required_bytes = 3;
+}
+
+message GetFileRequest {
+  string file_id = 1;
+}
+
+message ConfirmReferenceRequest {
+  string reference_id = 1;
+}
+
+message ConfirmReferenceResponse {
+}
+
+message DeleteReferenceRequest {
+  string reference_id = 1;
+}
+
+message DeleteReferenceResponse {
+  // Whether the file itself was deleted (this was its last reference).
+  bool file_deleted = 1;
+  int64 owner_usage_bytes = 2;
+}
+
+message GetUsageRequest {
+  Owner owner = 1;
+}
+
+message GetUsageResponse {
+  int64 usage_bytes = 1;
+}

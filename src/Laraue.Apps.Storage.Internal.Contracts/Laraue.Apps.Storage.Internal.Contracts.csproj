@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>true</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Grpc.AspNetCore.Server" Version="$(GrpcAspNetCoreServerVersion)" />
+        <PackageReference Include="Grpc.Tools" Version="$(GrpcToolsVersion)" PrivateAssets="All" />
+        <PackageReference Include="Google.Protobuf" Version="$(GoogleProtobufVersion)" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Protobuf Include="Protos\storage.proto" GrpcServices="Both" />
+    </ItemGroup>
+
+</Project>
