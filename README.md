@@ -6,9 +6,9 @@ image previews made from them. The service counts each owner's usage and checks 
 the caller passes; the limits themselves stay in the calling app. See [AGENTS.md](AGENTS.md) for the
 design and what's deliberately *not* built yet.
 
-**Stage 1 (BRD-339)**: internal gRPC `UploadFile`, `GetFile`, `GetDownloadUrl` (a presigned bucket link
-to redirect to - file bytes never go out through gRPC), `ConfirmReference`, `DeleteReference`,
-`GetUsage`.
+**Stage 1 (BRD-339)**: internal gRPC `UploadFile`, `GetFile` (each file has a public URL on the files
+domain - the bucket behind Cloudflare; file bytes never go through gRPC), `ConfirmReference`,
+`DeleteReference`, `GetUsage`.
 
 ## License
 

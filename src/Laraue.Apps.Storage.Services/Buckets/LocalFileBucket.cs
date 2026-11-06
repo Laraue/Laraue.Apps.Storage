@@ -1,25 +1,18 @@
 namespace Laraue.Apps.Storage.Services.Buckets;
 
 /// <summary>
-/// <see cref="IFileBucket"/> over a local directory, for tests and local runs without a bucket
-/// (<c>Bucket:LocalDirectory</c>). Its download links are <c>file://</c> URLs: tests read them, a browser can't -
-/// to click through downloads locally, point <c>Bucket:*</c> at a development B2 bucket or a local S3 server
-/// (MinIO) instead.
+/// <see cref="IFileBucket"/> over a local directory, for tests (<c>Bucket:LocalDirectory</c>). Headers aren't kept.
+/// With <c>Storage:PublicBaseUrl</c> set to the directory's <c>file://</c> URL, the files' URLs point into it.
 /// </summary>
 public class LocalFileBucket(string directory) : IFileBucket
 {
-    public async Task Write(string key, Stream content, string contentType, CancellationToken cancellationToken)
+    public async Task Write(string key, Stream content, FileObjectHeaders headers, CancellationToken cancellationToken)
     {
         var path = GetPath(key);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
         await using var fileStream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
         await content.CopyToAsync(fileStream, cancellationToken);
-    }
-
-    public Task<string> GetDownloadUrl(string key, FileDownload download)
-    {
-        return Task.FromResult(new Uri(GetPath(key)).AbsoluteUri);
     }
 
     public Task Delete(string key, CancellationToken cancellationToken)

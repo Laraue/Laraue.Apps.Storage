@@ -5,7 +5,7 @@ namespace Laraue.Apps.Storage.Services;
 /// <summary>
 /// Meter <c>Laraue.Apps.Storage</c>, exported on <c>/_metrics</c>:
 /// <c>storage_uploads_total{result}</c> (stored, deduplicated, quota_exceeded) and
-/// <c>storage_bucket_failures_total{operation}</c> (write, delete) - what the bucket alert watches. Every
+/// <c>storage_bucket_failures_total{operation}</c> (write, delete, purge - the CDN) - what the bucket alert watches. Every
 /// label value starts at zero so <c>increase()</c> sees the first event.
 /// </summary>
 public sealed class StorageMetrics
@@ -21,12 +21,12 @@ public sealed class StorageMetrics
         _uploads = meter.CreateCounter<long>("storage.uploads", description: "Uploads by result.");
         _bucketFailures = meter.CreateCounter<long>(
             "storage.bucket.failures",
-            description: "Failed writes and deletes of stored files.");
+            description: "Failed writes and deletes of stored files, and CDN purges of deleted ones.");
 
         foreach (var result in new[] { UploadResults.Stored, UploadResults.Deduplicated, UploadResults.QuotaExceeded })
             _uploads.Add(0, new KeyValuePair<string, object?>("result", result));
 
-        foreach (var operation in new[] { BucketOperations.Write, BucketOperations.Delete })
+        foreach (var operation in new[] { BucketOperations.Write, BucketOperations.Delete, BucketOperations.Purge })
             _bucketFailures.Add(0, new KeyValuePair<string, object?>("operation", operation));
     }
 
@@ -51,5 +51,6 @@ public sealed class StorageMetrics
     {
         public const string Write = "write";
         public const string Delete = "delete";
+        public const string Purge = "purge";
     }
 }

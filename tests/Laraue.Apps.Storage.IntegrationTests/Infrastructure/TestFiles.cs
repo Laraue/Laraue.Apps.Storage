@@ -69,15 +69,15 @@ public static class TestFiles
     }
 
     /// <summary>
-    /// Asks for the file's download link and reads it - a <c>file://</c> URL into the test bucket folder.
+    /// Reads the file from its URL - a <c>file://</c> URL into the test bucket folder.
     /// </summary>
     public static async Task<byte[]> Download(
         this InternalApiTestHost host,
         StorageService.StorageServiceClient client,
         string fileId)
     {
-        var location = await client.GetDownloadUrlAsync(new GetDownloadUrlRequest { FileId = fileId });
+        var file = await client.GetFileAsync(new GetFileRequest { FileId = fileId });
 
-        return await System.IO.File.ReadAllBytesAsync(new Uri(location.Url).LocalPath);
+        return await System.IO.File.ReadAllBytesAsync(new Uri(file.Url).LocalPath);
     }
 }

@@ -8,6 +8,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Laraue.Apps.Storage.Services.Buckets;
+using Laraue.Apps.Storage.Services.Cdn;
 using OpenTelemetry.Exporter;
 
 namespace Laraue.Apps.Storage.IntegrationTests.Infrastructure;
@@ -15,10 +17,18 @@ namespace Laraue.Apps.Storage.IntegrationTests.Infrastructure;
 public class InternalApiTestHost : WebApplicationFactory<Program>
 {
     /// <summary>
-    /// Stands in for the B2 bucket (<c>Bucket:LocalDirectory</c>), so no test reaches B2. Download links are
-    /// <c>file://</c> URLs into it.
+    /// Stands in for the B2 bucket, so no test reaches B2. Files' URLs are <c>file://</c> URLs into it.
     /// </summary>
     public string BucketDirectory { get; } = Path.Combine(Path.GetTempPath(), "storage-tests", Guid.NewGuid().ToString("N"), "bucket");
+
+    public RecordingFileBucket Bucket { get; }
+
+    public RecordingCdnCache Cdn { get; } = new();
+
+    public InternalApiTestHost()
+    {
+        Bucket = new RecordingFileBucket(BucketDirectory);
+    }
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -28,6 +38,7 @@ public class InternalApiTestHost : WebApplicationFactory<Program>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Bucket:LocalDirectory"] = BucketDirectory,
+                ["Storage:PublicBaseUrl"] = new Uri(BucketDirectory).AbsoluteUri,
             });
         });
 
@@ -35,6 +46,11 @@ public class InternalApiTestHost : WebApplicationFactory<Program>
         // would read stale numbers.
         builder.ConfigureServices(services => services.Configure<PrometheusAspNetCoreOptions>(
             options => options.ScrapeResponseCacheDurationMilliseconds = 0));
+
+        // Registered after the host's own, so these win.
+        builder.ConfigureServices(services => services
+            .AddSingleton<IFileBucket>(Bucket)
+            .AddSingleton<ICdnCache>(Cdn));
 
         return base.CreateHost(builder);
     }
@@ -71,6 +87,9 @@ public class InternalApiTestHost : WebApplicationFactory<Program>
     {
         if (Directory.Exists(BucketDirectory))
             Directory.Delete(BucketDirectory, recursive: true);
+
+        Bucket.Headers.Clear();
+        Cdn.PurgedUrls.Clear();
 
         return new InternalApiTestHostScope(Services.CreateScope());
     }

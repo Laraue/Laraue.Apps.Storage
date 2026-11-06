@@ -1,17 +1,15 @@
-using System.Web;
 using Laraue.Apps.Storage.Services.Buckets;
 using Microsoft.Extensions.Options;
 
 namespace Laraue.Apps.Storage.IntegrationTests;
 
 /// <summary>
-/// Signing a link is computed locally, so it's tested without a bucket. Writes and deletes against a real B2
-/// bucket aren't covered here.
+/// The upload request is built without a bucket. Writes and deletes against a real B2 bucket aren't covered here.
 /// </summary>
 public class S3FileBucketTests
 {
     [Fact]
-    public async Task GetDownloadUrl_ShouldSignLinkWithResponseHeaders_WhenAsked()
+    public void CreatePutRequest_ShouldCarryDownloadHeaders_WhenObjectIsWritten()
     {
         using var bucket = new S3FileBucket(Options.Create(new FileBucketOptions
         {
@@ -21,19 +19,18 @@ public class S3FileBucketTests
             KeyId = "key-id",
             ApplicationKey = "application-key",
         }));
+        using var content = new MemoryStream([1, 2, 3]);
 
-        var url = new Uri(await bucket.GetDownloadUrl(
+        var request = bucket.CreatePutRequest(
             "files/abc",
-            new FileDownload("application/pdf", "attachment; filename=report.pdf", DateTime.UtcNow.AddMinutes(30))));
+            content,
+            new FileObjectHeaders("application/pdf", "attachment; filename=report.pdf", "public, max-age=31536000, immutable"));
 
-        var query = HttpUtility.ParseQueryString(url.Query);
-        Assert.Equal("https", url.Scheme);
-        Assert.Equal("s3.eu-central-003.backblazeb2.com", url.Host);
-        Assert.Equal("/laraue-files/files/abc", url.AbsolutePath);
-        Assert.Equal("application/pdf", query["response-content-type"]);
-        Assert.Equal("attachment; filename=report.pdf", query["response-content-disposition"]);
-        Assert.NotNull(query["X-Amz-Signature"]);
-        Assert.Contains("key-id", query["X-Amz-Credential"]);
-        Assert.Contains("eu-central-003", query["X-Amz-Credential"]);
+        Assert.Equal("laraue-files", request.BucketName);
+        Assert.Equal("files/abc", request.Key);
+        Assert.Equal("application/pdf", request.ContentType);
+        Assert.Equal("attachment; filename=report.pdf", request.Headers.ContentDisposition);
+        Assert.Equal("public, max-age=31536000, immutable", request.Headers.CacheControl);
+        Assert.False(request.UseChunkEncoding);
     }
 }

@@ -1,5 +1,6 @@
 using Laraue.Apps.Storage.Services;
 using Laraue.Apps.Storage.Services.Buckets;
+using Laraue.Apps.Storage.Services.Cdn;
 using Laraue.Apps.Storage.Services.Previews;
 using Laraue.Core.DateTime.Services.Abstractions;
 using Laraue.Core.DateTime.Services.Impl;
@@ -30,7 +31,18 @@ public static class ServiceCollectionExtensions
 
             builder.AddValidatedOptions<StorageOptions>("Storage");
 
-            builder.Services.AddSingleton<PreviewLinkCache>();
+            // Deleted files are purged from Cloudflare's cache. Without the Cloudflare section (tests, local runs)
+            // there's no CDN to purge.
+            if (builder.Configuration.GetSection("Cloudflare").Exists())
+            {
+                builder.AddValidatedOptions<CloudflareOptions>("Cloudflare");
+                builder.Services.AddHttpClient<ICdnCache, CloudflareCdnCache>(
+                    client => client.BaseAddress = new Uri(CloudflareCdnCache.BaseAddress));
+            }
+            else
+            {
+                builder.Services.AddSingleton<ICdnCache, NoCdnCache>();
+            }
 
             // Originals and previews go to the B2 bucket. Bucket:LocalDirectory (tests) keeps them in a folder
             // instead, with no credentials needed; it's never set in production.

@@ -1,4 +1,3 @@
-using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Laraue.Apps.Storage.Services;
 // The generated proto types share names with the domain ones (ServiceId, StoredFile, QuotaExceeded) - alias the
@@ -57,28 +56,6 @@ public sealed class StorageGrpcService(IFilesService filesService)
         var file = await ExecuteAsync(() => filesService.GetAsync(serviceId, fileId, context.CancellationToken));
 
         return ToContractFile(file);
-    }
-
-    public override async Task<Contracts.GetDownloadUrlResponse> GetDownloadUrl(
-        Contracts.GetDownloadUrlRequest request,
-        ServerCallContext context)
-    {
-        var serviceId = ReadDomainServiceId(context);
-        var fileId = ParseFileId(request.FileId);
-
-        var location = await ExecuteAsync(() => filesService.GetDownloadLocationAsync(
-            serviceId,
-            fileId,
-            request.Attachment,
-            string.IsNullOrEmpty(request.DownloadFileName) ? null : request.DownloadFileName,
-            context.CancellationToken));
-
-        return new Contracts.GetDownloadUrlResponse
-        {
-            File = ToContractFile(location.File),
-            Url = location.Url,
-            ExpiresAt = Timestamp.FromDateTime(DateTime.SpecifyKind(location.ExpiresAt, DateTimeKind.Utc)),
-        };
     }
 
     public override async Task<Contracts.ConfirmReferenceResponse> ConfirmReference(
@@ -176,6 +153,7 @@ public sealed class StorageGrpcService(IFilesService filesService)
         FileName = file.FileName,
         ContentType = file.ContentType,
         Size = file.Size,
+        Url = file.Url,
     };
 
     private static Guid ParseFileId(string fileId) => ParseId(fileId, "file");

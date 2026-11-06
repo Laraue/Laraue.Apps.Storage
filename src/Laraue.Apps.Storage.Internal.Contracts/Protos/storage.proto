@@ -1,7 +1,5 @@
 syntax = "proto3";
 
-import "google/protobuf/timestamp.proto";
-
 option csharp_namespace = "Laraue.Apps.Storage.Internal.Contracts";
 package laraue.apps.storage.internal.v1;
 
@@ -30,14 +28,9 @@ service StorageService {
   // unknown or was already deleted (e.g. it stayed pending too long) - the caller's link has no file.
   rpc ConfirmReference (ConfirmReferenceRequest) returns (ConfirmReferenceResponse);
 
-  // A file's name, type and size. NOT_FOUND for an unknown or deleted file.
+  // A file's name, type, size and URL. NOT_FOUND for an unknown or deleted file.
   rpc GetFile (GetFileRequest) returns (StoredFile);
 
-  // A presigned bucket link the caller redirects its client to (302) for the file's bytes - they
-  // never pass through gRPC or the caller. An original's link works for half an hour; a preview's
-  // is the same all day and works until the end of the next day, so browsers cache the image. The
-  // bucket serves byte ranges. NOT_FOUND for an unknown file.
-  rpc GetDownloadUrl (GetDownloadUrlRequest) returns (GetDownloadUrlResponse);
 
   // Deletes a reference (pending or confirmed). When it was the file's last one, the file and its
   // preview are deleted and the owner's usage goes down. Deleting an unknown or already deleted
@@ -69,6 +62,12 @@ message StoredFile {
   string content_type = 3;
   // Stored size in bytes.
   int64 size = 4;
+  // Where clients download the file: a public, permanent URL on the files domain (B2 behind
+  // Cloudflare, cached at the edge). The file's id is in it and unguessable, which is the only
+  // access check - like a caller's own link by file id. Callers redirect to it (302) or use it
+  // directly; file bytes never pass through gRPC. Images and videos are served inline, other files
+  // as attachments named file_name. Gone (404) once the file is deleted.
+  string url = 5;
 }
 
 message UploadFileRequest {
@@ -116,24 +115,6 @@ message QuotaExceeded {
 
 message GetFileRequest {
   string file_id = 1;
-}
-
-message GetDownloadUrlRequest {
-  string file_id = 1;
-  // Whether the client should save the file (Content-Disposition: attachment) rather than show it
-  // (inline).
-  bool attachment = 2;
-  // The name to save it as; the stored name when empty.
-  string download_file_name = 3;
-}
-
-message GetDownloadUrlResponse {
-  StoredFile file = 1;
-  // Redirect the client here until expires_at. Content-Type and Content-Disposition are set by
-  // the link.
-  string url = 2;
-  // When url stops working. A caller may let clients cache its redirect until shortly before.
-  google.protobuf.Timestamp expires_at = 3;
 }
 
 message ConfirmReferenceRequest {

@@ -30,38 +30,31 @@ public sealed class S3FileBucket : IFileBucket, IDisposable
             });
     }
 
-    public async Task Write(string key, Stream content, string contentType, CancellationToken cancellationToken)
+    public async Task Write(string key, Stream content, FileObjectHeaders headers, CancellationToken cancellationToken)
     {
-        await _client.PutObjectAsync(
-            new PutObjectRequest
-            {
-                BucketName = _bucketName,
-                Key = key,
-                InputStream = content,
-                AutoCloseStream = false,
-                ContentType = contentType,
-                // Files are small (10 MB at most); a signed single payload works with every S3-compatible API.
-                UseChunkEncoding = false,
-            },
-            cancellationToken);
+        await _client.PutObjectAsync(CreatePutRequest(key, content, headers), cancellationToken);
     }
 
-    public Task<string> GetDownloadUrl(string key, FileDownload download)
+    /// <summary>
+    /// The upload request: B2 keeps <c>Content-Type</c>, <c>Content-Disposition</c> and <c>Cache-Control</c> with the
+    /// object and answers every download with them.
+    /// </summary>
+    public PutObjectRequest CreatePutRequest(string key, Stream content, FileObjectHeaders headers)
     {
-        // Signed locally, no request to the bucket. The bucket answers byte ranges itself.
-        return _client.GetPreSignedURLAsync(new GetPreSignedUrlRequest
+        var request = new PutObjectRequest
         {
             BucketName = _bucketName,
             Key = key,
-            Verb = HttpVerb.GET,
-            Protocol = Protocol.HTTPS,
-            Expires = download.ExpiresAt,
-            ResponseHeaderOverrides =
-            {
-                ContentType = download.ContentType,
-                ContentDisposition = download.ContentDisposition,
-            },
-        });
+            InputStream = content,
+            AutoCloseStream = false,
+            ContentType = headers.ContentType,
+            // Files are small (20 MB at most); a signed single payload works with every S3-compatible API.
+            UseChunkEncoding = false,
+        };
+        request.Headers.ContentDisposition = headers.ContentDisposition;
+        request.Headers.CacheControl = headers.CacheControl;
+
+        return request;
     }
 
     public async Task Delete(string key, CancellationToken cancellationToken)

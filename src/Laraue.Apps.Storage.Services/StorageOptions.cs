@@ -15,11 +15,13 @@ public class StorageOptions
     public int MaxFileSizeBytes { get; set; } = 20_000_000;
 
     /// <summary>
-    /// How long a signed download link to an original works. Callers redirect to it at once, so it only needs to
-    /// outlive the redirect and the client's range requests on the same link (a video being played). Preview links
-    /// work until the end of the next day instead, see <c>FilesService</c>.
+    /// Where clients download files: the bucket's public URL on the files domain, behind Cloudflare, e.g.
+    /// <c>https://files.laraue.com/file/laraue-files</c>. A file's URL is this plus its key
+    /// (<c>/files/&lt;id&gt;</c>, <c>/previews/&lt;id&gt;.webp</c>).
     /// </summary>
-    public TimeSpan DownloadUrlLifetime { get; set; } = TimeSpan.FromMinutes(30);
+    [Required]
+    [Url]
+    public required string PublicBaseUrl { get; set; }
 
     /// <summary>
     /// How long a reference may stay pending (uploaded, not confirmed by the caller) before it's deleted with its

@@ -2,11 +2,11 @@ using System.Security.Cryptography;
 using Laraue.Apps.Storage.DataAccess;
 using Laraue.Apps.Storage.DataAccess.Entities;
 using Laraue.Apps.Storage.Services.Buckets;
+using Laraue.Apps.Storage.Services.Cdn;
 using Laraue.Apps.Storage.Services.Previews;
 using Laraue.Apps.Storage.Services.Resources;
 using Laraue.Core.DateTime.Services.Abstractions;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
@@ -36,7 +36,7 @@ public sealed record UploadData(
     byte[] Content,
     long? QuotaBytes);
 
-public sealed record FileDetails(Guid Id, string FileName, string ContentType, long Size);
+public sealed record FileDetails(Guid Id, string FileName, string ContentType, long Size, string Url);
 
 public abstract record UploadResult;
 
@@ -52,11 +52,6 @@ public sealed record QuotaExceeded(long OwnerUsageBytes, long QuotaBytes, long R
 
 public sealed record ReferenceDeleteResult(bool FileDeleted, long OwnerUsageBytes);
 
-/// <summary>
-/// Where a client downloads a file: redirect to <see cref="Url"/> until <see cref="ExpiresAt"/>.
-/// </summary>
-public sealed record FileDownloadLocation(FileDetails File, string Url, DateTime ExpiresAt);
-
 public interface IFilesService
 {
     /// <summary>
@@ -69,17 +64,6 @@ public interface IFilesService
     /// Throws <see cref="StoredFileNotFoundException"/> when the calling service has no such file.
     /// </summary>
     Task<FileDetails> GetAsync(ServiceId serviceId, Guid fileId, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Where to download the file from, saved as <paramref name="downloadFileName"/> (the stored name when null)
-    /// when <paramref name="attachment"/>. Throws <see cref="StoredFileNotFoundException"/>.
-    /// </summary>
-    Task<FileDownloadLocation> GetDownloadLocationAsync(
-        ServiceId serviceId,
-        Guid fileId,
-        bool attachment,
-        string? downloadFileName,
-        CancellationToken cancellationToken);
 
     /// <summary>
     /// Confirms a pending reference; a confirmed one stays as it is. Throws
@@ -109,7 +93,7 @@ public interface IFilesService
 public sealed class FilesService(
     DatabaseContext context,
     IFileBucket bucket,
-    PreviewLinkCache previewLinks,
+    ICdnCache cdnCache,
     IPreviewMaker previewMaker,
     IDateTimeProvider dateTimeProvider,
     IOptions<StorageOptions> options,
@@ -249,58 +233,14 @@ public sealed class FilesService(
 
     public async Task<FileDetails> GetAsync(ServiceId serviceId, Guid fileId, CancellationToken cancellationToken)
     {
-        return await context.StoredFiles
-            .Where(x => x.Id == fileId)
-            .Where(x => x.Owner!.ServiceId == serviceId)
-            .Select(x => new FileDetails(x.Id, x.FileName, x.ContentType, x.Size))
-            .FirstOrDefaultAsync(cancellationToken)
-            ?? throw new StoredFileNotFoundException(fileId);
-    }
-
-    public async Task<FileDownloadLocation> GetDownloadLocationAsync(
-        ServiceId serviceId,
-        Guid fileId,
-        bool attachment,
-        string? downloadFileName,
-        CancellationToken cancellationToken)
-    {
         var file = await context.StoredFiles
             .Where(x => x.Id == fileId)
             .Where(x => x.Owner!.ServiceId == serviceId)
-            .Select(x => new { x.Id, x.FileName, x.ContentType, x.Size, x.Kind, x.StorageKey })
+            .Select(x => new { x.Id, x.FileName, x.ContentType, x.Size, x.StorageKey })
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw new StoredFileNotFoundException(fileId);
 
-        var details = new FileDetails(file.Id, file.FileName, file.ContentType, file.Size);
-        var disposition = GetContentDisposition(attachment, downloadFileName ?? file.FileName);
-        var now = dateTimeProvider.UtcNow;
-
-        if (file.Kind == StoredFileKind.Original)
-        {
-            var expiresAt = now + options.Value.DownloadUrlLifetime;
-            var url = await bucket.GetDownloadUrl(file.StorageKey, new FileDownload(file.ContentType, disposition, expiresAt));
-
-            return new FileDownloadLocation(details, url, expiresAt);
-        }
-
-        // Previews are shown on every board render. Each signing makes a new URL, which the browser would download
-        // again; the same link all day lets it (and the caller's cached redirect) reuse the image.
-        var cacheKey = $"preview-link:{file.Id}:{disposition}";
-        if (!previewLinks.Cache.TryGetValue(cacheKey, out FileDownloadLocation? location) || location is null)
-        {
-            var expiresAt = DateTime.SpecifyKind(now.Date.AddDays(2), DateTimeKind.Utc);
-            var url = await bucket.GetDownloadUrl(file.StorageKey, new FileDownload(file.ContentType, disposition, expiresAt));
-
-            location = new FileDownloadLocation(details, url, expiresAt);
-            previewLinks.Cache.Set(cacheKey, location, new MemoryCacheEntryOptions
-            {
-                // Until the end of today, so a link handed out is always good for at least a day.
-                AbsoluteExpiration = DateTime.SpecifyKind(now.Date.AddDays(1), DateTimeKind.Utc),
-                Size = 1,
-            });
-        }
-
-        return location;
+        return new FileDetails(file.Id, file.FileName, file.ContentType, file.Size, GetUrl(file.StorageKey));
     }
 
     public async Task ConfirmReferenceAsync(
@@ -532,6 +472,8 @@ public sealed class FilesService(
         if (preview is not null)
             await DeleteContent(preview);
 
+        await PurgeFromCdn(preview is null ? [original] : [original, preview]);
+
         return new ReferenceDeleteResult(true, owner.UsageBytes);
     }
 
@@ -540,7 +482,11 @@ public sealed class FilesService(
         try
         {
             using var stream = new MemoryStream(content, writable: false);
-            await bucket.Write(file.StorageKey, stream, file.ContentType, cancellationToken);
+            var headers = new FileObjectHeaders(
+                file.ContentType,
+                GetContentDisposition(file.ContentType, file.FileName),
+                ImmutableCacheControl);
+            await bucket.Write(file.StorageKey, stream, headers, cancellationToken);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
@@ -576,6 +522,27 @@ public sealed class FilesService(
             throw new StorageValidationException(Errors.OwnerInvalid);
     }
 
+    /// <summary>
+    /// The CDN forgets a deleted file at once; browsers that already downloaded it keep their copy.
+    /// </summary>
+    private async Task PurgeFromCdn(IReadOnlyCollection<StoredFile> files)
+    {
+        try
+        {
+            await cdnCache.PurgeAsync(files.Select(x => GetUrl(x.StorageKey)).ToArray(), CancellationToken.None);
+        }
+        catch (Exception e)
+        {
+            metrics.RecordBucketFailure(StorageMetrics.BucketOperations.Purge);
+            logger.LogError(e, "Couldn't purge deleted files {FileIds} from the CDN", files.Select(x => x.Id));
+        }
+    }
+
+    private string GetUrl(string key) => $"{options.Value.PublicBaseUrl.TrimEnd('/')}/{key}";
+
+    private FileDetails ToDetails(StoredFile file) =>
+        new(file.Id, file.FileName, file.ContentType, file.Size, GetUrl(file.StorageKey));
+
     private static string ValidateContentType(string contentType)
     {
         var value = contentType.Trim();
@@ -609,15 +576,23 @@ public sealed class FilesService(
     }
 
     /// <summary>
-    /// <c>inline</c>, or <c>attachment</c> with the name in both forms browsers read (ASCII and RFC 5987 UTF-8).
+    /// Objects never change - the key is the file id - so clients and the CDN keep them for a year.
     /// </summary>
-    private static string GetContentDisposition(bool attachment, string fileName)
+    private const string ImmutableCacheControl = "public, max-age=31536000, immutable";
+
+    /// <summary>
+    /// Images and videos are shown (<c>inline</c>); anything else is saved, as <c>attachment</c> with its name in both
+    /// forms browsers read (ASCII and RFC 5987 UTF-8). SVG is saved too: it can carry scripts.
+    /// </summary>
+    private static string GetContentDisposition(string contentType, string fileName)
     {
-        if (!attachment)
+        var isShown = contentType.StartsWith("video/", StringComparison.Ordinal)
+            || contentType.StartsWith("image/", StringComparison.Ordinal) && contentType != "image/svg+xml";
+        if (isShown)
             return "inline";
 
         var value = new ContentDispositionHeaderValue("attachment");
-        value.SetHttpFileName(NormalizeFileName(fileName));
+        value.SetHttpFileName(fileName);
 
         return value.ToString();
     }
@@ -626,5 +601,4 @@ public sealed class FilesService(
 
     private static string GetPreviewKey(Guid fileId) => $"previews/{fileId:N}.webp";
 
-    private static FileDetails ToDetails(StoredFile file) => new(file.Id, file.FileName, file.ContentType, file.Size);
 }
