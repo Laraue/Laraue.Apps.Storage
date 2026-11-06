@@ -13,7 +13,7 @@ public sealed class Program
 {
     /// <summary>
     /// The largest request accepted: an upload is one message holding the whole file
-    /// (<see cref="StorageOptions.MaxFileSizeBytes"/>, 20 MB by default) plus its fields.
+    /// (<see cref="StorageOptions.MaxFileSizeBytes"/>, 20 MB in appsettings.json) plus its fields.
     /// </summary>
     private const int MaxReceiveMessageSize = 32 * 1024 * 1024;
 
