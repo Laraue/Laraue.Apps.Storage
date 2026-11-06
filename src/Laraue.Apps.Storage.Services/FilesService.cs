@@ -6,6 +6,7 @@ using Laraue.Apps.Storage.Services.Previews;
 using Laraue.Apps.Storage.Services.Resources;
 using Laraue.Core.DateTime.Services.Abstractions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
@@ -86,7 +87,8 @@ public interface IFilesService
 
 public sealed class FilesService(
     DatabaseContext context,
-    FileBuckets buckets,
+    [FromKeyedServices(BucketKeys.Originals)] IFileBucket originals,
+    [FromKeyedServices(BucketKeys.Previews)] IFileBucket previews,
     IPreviewMaker previewMaker,
     IDateTimeProvider dateTimeProvider,
     IOptions<StorageOptions> options,
@@ -255,7 +257,7 @@ public sealed class FilesService(
             GetContentDisposition(attachment, downloadFileName ?? file.FileName),
             expiresAt);
 
-        var url = await buckets.For(file.Location).GetDownloadUrl(file.StorageKey, download);
+        var url = await BucketFor(file.Location).GetDownloadUrl(file.StorageKey, download);
 
         return new FileDownloadLocation(details, url, expiresAt);
     }
@@ -393,12 +395,19 @@ public sealed class FilesService(
         }
     }
 
+    private IFileBucket BucketFor(StoredFileLocation location) => location switch
+    {
+        StoredFileLocation.Bucket => originals,
+        StoredFileLocation.LocalDisk => previews,
+        _ => throw new ArgumentOutOfRangeException(nameof(location), location, null),
+    };
+
     private async Task WriteContent(StoredFile file, byte[] content, CancellationToken cancellationToken)
     {
         try
         {
             using var stream = new MemoryStream(content, writable: false);
-            await buckets.For(file.Location).Write(file.StorageKey, stream, file.ContentType, cancellationToken);
+            await BucketFor(file.Location).Write(file.StorageKey, stream, file.ContentType, cancellationToken);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
@@ -412,7 +421,7 @@ public sealed class FilesService(
     {
         try
         {
-            await buckets.For(file.Location).Delete(file.StorageKey, CancellationToken.None);
+            await BucketFor(file.Location).Delete(file.StorageKey, CancellationToken.None);
         }
         catch (Exception e)
         {

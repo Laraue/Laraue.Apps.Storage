@@ -33,8 +33,7 @@ public static class ServiceCollectionExtensions
             builder.Services
                 .AddSingleton<FileLinkSigner>()
                 .AddSingleton<LocalFileLinks>()
-                .AddSingleton<FileBuckets>()
-                .AddKeyedSingleton<IFileBucket>(FileBuckets.PreviewsKey, (sp, _) => new LocalFileBucket(
+                .AddKeyedSingleton<IFileBucket>(BucketKeys.Previews, (sp, _) => new LocalFileBucket(
                     sp.GetRequiredService<IOptions<StorageOptions>>().Value.PreviewsDirectory,
                     LocalFileBucket.PreviewsArea,
                     sp.GetRequiredService<LocalFileLinks>()));
@@ -45,11 +44,11 @@ public static class ServiceCollectionExtensions
             if (string.IsNullOrEmpty(localBucketDirectory))
             {
                 builder.AddValidatedOptions<FileBucketOptions>("Bucket");
-                builder.Services.AddKeyedSingleton<IFileBucket, S3FileBucket>(FileBuckets.OriginalsKey);
+                builder.Services.AddKeyedSingleton<IFileBucket, S3FileBucket>(BucketKeys.Originals);
             }
             else
             {
-                builder.Services.AddKeyedSingleton<IFileBucket>(FileBuckets.OriginalsKey, (sp, _) => new LocalFileBucket(
+                builder.Services.AddKeyedSingleton<IFileBucket>(BucketKeys.Originals, (sp, _) => new LocalFileBucket(
                     localBucketDirectory,
                     LocalFileBucket.OriginalsArea,
                     sp.GetRequiredService<LocalFileLinks>()));
