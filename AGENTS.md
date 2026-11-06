@@ -209,11 +209,18 @@ Always `ILogger<T>`, never the bare non-generic `ILogger`.
 
 ## Metrics
 
-Prometheus on `InternalApiHost`'s `/_metrics` (health port), meter `Laraue.Apps.Storage`
-(`StorageMetrics`): `storage_uploads_total{result}` (stored, deduplicated, quota_exceeded) and
-`storage_bucket_failures_total{operation}` (write, delete) - the Infra alert on bucket errors
-watches the latter. Same conventions as Feedback/Identity/Billing: counters are events, every label
-value starts at zero, labels are low-cardinality - never an owner or file id.
+Prometheus on `InternalApiHost`'s `/_metrics` (health port), meter `Laraue.Apps.Storage`. Same
+conventions as Feedback/Identity/Billing: labels are low-cardinality - never an owner or file id.
+- Counters (`StorageMetrics`, events, every label value starts at zero):
+  `storage_uploads_total{result}` (stored, deduplicated, quota_exceeded) and
+  `storage_bucket_failures_total{operation}` (write, delete) - the Infra alert on bucket errors
+  watches the latter.
+- Gauges (`StorageStateMetrics`, read from the database every 60 s by a background service, a scrape
+  only reads the last snapshot): `storage_stored_bytes{location}` and `storage_stored_files{location}`
+  (`bucket` - B2 originals, what B2 bills; `local_disk` - previews on the server's disk, next to
+  BRD-347's disk alerts), `storage_owners{kind}` (organizations and users with files) and
+  `storage_usage_bytes` (the owners' usage counters summed - equal to the stored bytes summed unless a
+  counter drifted). From the database, not counted in the buckets: exact, and they survive restarts.
 
 ## Database safety
 

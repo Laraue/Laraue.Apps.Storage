@@ -23,7 +23,9 @@ public static class ServiceCollectionExtensions
                 .AddMetrics()
                 .AddSingleton<StorageMetrics>()
                 .AddSingleton<IPreviewMaker, PreviewMaker>()
-                .AddScoped<IFilesService, FilesService>();
+                .AddScoped<IFilesService, FilesService>()
+                .AddSingleton<StorageStateMetrics>()
+                .AddHostedService(sp => sp.GetRequiredService<StorageStateMetrics>());
 
             builder.AddValidatedOptions<StorageOptions>("Storage");
 
