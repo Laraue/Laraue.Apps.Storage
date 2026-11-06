@@ -19,11 +19,17 @@ public static class TestFiles
 
     public static byte[] Text(string text) => System.Text.Encoding.UTF8.GetBytes(text);
 
-    public static UploadFileRequest Upload(byte[] content, string fileName = "notes.txt", string contentType = "text/plain", string owner = "organization:1")
+    public static Owner Organization(long organizationId = 1) => new() { OrganizationId = organizationId };
+
+    public static UploadFileRequest Upload(
+        byte[] content,
+        string fileName = "notes.txt",
+        string contentType = "text/plain",
+        Owner? owner = null)
     {
         return new UploadFileRequest
         {
-            Owner = owner,
+            Owner = owner ?? Organization(),
             UserId = Guid.NewGuid().ToString(),
             FileName = fileName,
             ContentType = contentType,

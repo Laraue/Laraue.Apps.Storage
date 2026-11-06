@@ -10,14 +10,15 @@ package laraue.apps.storage.internal.v1;
 // below), not repeated on every request message. Every call requires it, and a service sees only
 // its own files: another service's file id is NOT_FOUND.
 //
-// Files belong to an owner, a key the calling service chooses (Boards: "organization:42"). The
-// owner's usage is the stored size of its files (originals plus previews); this service doesn't
-// know the owner's limit, the caller passes it with each upload.
+// Files belong to an owner: an organization of the calling service (Boards: the organization the
+// file is uploaded in) or a Laraue user. Owners are separate per calling service. The owner's usage
+// is the stored size of its files (originals plus previews); this service doesn't know the owner's
+// limit, the caller passes it with each upload.
 service StorageService {
   // Stores a file for an owner and returns it, with a preview for an image. The same content
   // uploaded again for the same owner isn't stored twice: the existing file is returned and gains
   // a reference, and DeleteFile removes it only when the last reference is gone. A file over the
-  // size this service accepts, an empty file or an invalid owner is INVALID_ARGUMENT.
+  // size this service accepts, an empty file or a missing owner is INVALID_ARGUMENT.
   rpc UploadFile (UploadFileRequest) returns (UploadFileResponse);
 
   // A file's name, type and size. NOT_FOUND for an unknown or deleted file.
@@ -42,6 +43,16 @@ enum ServiceId {
   SERVICE_ID_LARAUE_BOARDS = 1;
 }
 
+// Whoever a file is stored for. Exactly one must be set.
+message Owner {
+  oneof kind {
+    // The calling service's own organization id (Boards: Organization.Id). Greater than zero.
+    int64 organization_id = 1;
+    // The global Laraue user id (from Identity).
+    string user_id = 2;
+  }
+}
+
 message StoredFile {
   string id = 1;
   string file_name = 2;
@@ -51,9 +62,8 @@ message StoredFile {
 }
 
 message UploadFileRequest {
-  // The owner the file is stored for and whose usage it counts toward, chosen by the caller.
-  // 1-128 characters.
-  string owner = 1;
+  // Whose usage the file counts toward.
+  Owner owner = 1;
   // The global Laraue user id (from Identity) of whoever uploaded it, kept for audit. Optional.
   string user_id = 2;
   string file_name = 3;
@@ -131,7 +141,7 @@ message DeleteFileResponse {
 }
 
 message GetUsageRequest {
-  string owner = 1;
+  Owner owner = 1;
 }
 
 message GetUsageResponse {

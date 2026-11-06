@@ -28,7 +28,7 @@
         <value>The quota can't be negative.</value>
     </data>
     <data name="OwnerInvalid" xml:space="preserve">
-        <value>The owner must be 1-{0} characters.</value>
+        <value>The owner must be an organization id greater than zero or a user id.</value>
     </data>
     <data name="ContentTypeInvalid" xml:space="preserve">
         <value>The content type must be a mime type like 'image/png'.</value>

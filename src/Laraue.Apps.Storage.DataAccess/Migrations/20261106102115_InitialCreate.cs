@@ -7,7 +7,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Laraue.Apps.Storage.DataAccess.Migrations
 {
     /// <inheritdoc />
-    public partial class Initial : Migration
+    public partial class InitialCreate : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -31,14 +31,17 @@ namespace Laraue.Apps.Storage.DataAccess.Migrations
                 {
                     id = table.Column<long>(type: "bigint", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    kind = table.Column<int>(type: "integer", nullable: false),
                     service_id = table.Column<int>(type: "integer", nullable: false),
-                    key = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: false),
                     usage_bytes = table.Column<long>(type: "bigint", nullable: false),
-                    created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                    created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    organization_id = table.Column<long>(type: "bigint", nullable: true),
+                    user_id = table.Column<Guid>(type: "uuid", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("pk_owners", x => x.id);
+                    table.CheckConstraint("ck_owners_kind_id", "(kind = 1 and organization_id is not null and user_id is null) or (kind = 2 and user_id is not null and organization_id is null)");
                     table.ForeignKey(
                         name: "fk_owners_services_service_id",
                         column: x => x.service_id,
@@ -88,10 +91,23 @@ namespace Laraue.Apps.Storage.DataAccess.Migrations
                 values: new object[] { 1, "laraue_boards", "Laraue Boards" });
 
             migrationBuilder.CreateIndex(
-                name: "ix_owners_service_id_key",
+                name: "ix_owners_service_id",
                 table: "owners",
-                columns: new[] { "service_id", "key" },
-                unique: true);
+                column: "service_id");
+
+            migrationBuilder.CreateIndex(
+                name: "ix_owners_service_id_organization_id",
+                table: "owners",
+                columns: new[] { "service_id", "organization_id" },
+                unique: true,
+                filter: "organization_id is not null");
+
+            migrationBuilder.CreateIndex(
+                name: "ix_owners_service_id_user_id",
+                table: "owners",
+                columns: new[] { "service_id", "user_id" },
+                unique: true,
+                filter: "user_id is not null");
 
             migrationBuilder.CreateIndex(
                 name: "ix_stored_files_owner_id_content_hash",

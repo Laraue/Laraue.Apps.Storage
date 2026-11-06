@@ -35,11 +35,9 @@ namespace Laraue.Apps.Storage.DataAccess.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<string>("Key")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
-                        .HasColumnName("key");
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer")
+                        .HasColumnName("kind");
 
                     b.Property<int>("ServiceId")
                         .HasColumnType("integer")
@@ -52,11 +50,17 @@ namespace Laraue.Apps.Storage.DataAccess.Migrations
                     b.HasKey("Id")
                         .HasName("pk_owners");
 
-                    b.HasIndex("ServiceId", "Key")
-                        .IsUnique()
-                        .HasDatabaseName("ix_owners_service_id_key");
+                    b.HasIndex("ServiceId")
+                        .HasDatabaseName("ix_owners_service_id");
 
-                    b.ToTable("owners", (string)null);
+                    b.ToTable("owners", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_owners_kind_id", "(kind = 1 and organization_id is not null and user_id is null) or (kind = 2 and user_id is not null and organization_id is null)");
+                        });
+
+                    b.HasDiscriminator<int>("Kind");
+
+                    b.UseTphMappingStrategy();
                 });
 
             modelBuilder.Entity("Laraue.Apps.Storage.DataAccess.Entities.Service", b =>
@@ -163,6 +167,48 @@ namespace Laraue.Apps.Storage.DataAccess.Migrations
                         .HasDatabaseName("ix_stored_files_owner_id_content_hash");
 
                     b.ToTable("stored_files", (string)null);
+                });
+
+            modelBuilder.Entity("Laraue.Apps.Storage.DataAccess.Entities.OrganizationOwner", b =>
+                {
+                    b.HasBaseType("Laraue.Apps.Storage.DataAccess.Entities.Owner");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("organization_id");
+
+                    b.HasIndex("ServiceId", "OrganizationId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_owners_service_id_organization_id")
+                        .HasFilter("organization_id is not null");
+
+                    b.ToTable("owners", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_owners_kind_id", "(kind = 1 and organization_id is not null and user_id is null) or (kind = 2 and user_id is not null and organization_id is null)");
+                        });
+
+                    b.HasDiscriminator().HasValue(1);
+                });
+
+            modelBuilder.Entity("Laraue.Apps.Storage.DataAccess.Entities.UserOwner", b =>
+                {
+                    b.HasBaseType("Laraue.Apps.Storage.DataAccess.Entities.Owner");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasIndex("ServiceId", "UserId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_owners_service_id_user_id")
+                        .HasFilter("user_id is not null");
+
+                    b.ToTable("owners", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_owners_kind_id", "(kind = 1 and organization_id is not null and user_id is null) or (kind = 2 and user_id is not null and organization_id is null)");
+                        });
+
+                    b.HasDiscriminator().HasValue(2);
                 });
 
             modelBuilder.Entity("Laraue.Apps.Storage.DataAccess.Entities.Owner", b =>

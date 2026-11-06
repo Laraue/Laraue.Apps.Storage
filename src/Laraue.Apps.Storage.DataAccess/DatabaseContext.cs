@@ -22,7 +22,32 @@ public class DatabaseContext : DbContext
 
         modelBuilder.Entity<Owner>(builder =>
         {
-            builder.HasIndex(x => new { x.ServiceId, x.Key }).IsUnique();
+            builder
+                .HasDiscriminator(x => x.Kind)
+                .HasValue<OrganizationOwner>(OwnerKind.Organization)
+                .HasValue<UserOwner>(OwnerKind.User);
+            builder.ToTable(t => t.HasCheckConstraint(
+                "ck_owners_kind_id",
+                $"(kind = {(int)OwnerKind.Organization} and organization_id is not null and user_id is null) " +
+                $"or (kind = {(int)OwnerKind.User} and user_id is not null and organization_id is null)"));
+        });
+
+        // Unique per service; filtered, since the other kind's rows have null there. FilesService.LockOwner's
+        // "on conflict" names these columns and filters.
+        modelBuilder.Entity<OrganizationOwner>(builder =>
+        {
+            builder
+                .HasIndex(x => new { x.ServiceId, x.OrganizationId })
+                .IsUnique()
+                .HasFilter("organization_id is not null");
+        });
+
+        modelBuilder.Entity<UserOwner>(builder =>
+        {
+            builder
+                .HasIndex(x => new { x.ServiceId, x.UserId })
+                .IsUnique()
+                .HasFilter("user_id is not null");
         });
 
         modelBuilder.Entity<StoredFile>(builder =>

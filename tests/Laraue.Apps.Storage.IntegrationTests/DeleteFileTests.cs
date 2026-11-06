@@ -21,7 +21,7 @@ public class DeleteFileTests(InternalApiTestHost host) : IClassFixture<InternalA
         Assert.Equal(0, await testScope.Database.StoredFiles.CountAsync());
         Assert.Empty(Directory.EnumerateFiles(host.BucketDirectory, "*", SearchOption.AllDirectories));
         Assert.Empty(Directory.EnumerateFiles(host.PreviewsDirectory, "*", SearchOption.AllDirectories));
-        Assert.Equal(0, (await client.GetUsageAsync(new GetUsageRequest { Owner = "organization:1" })).UsageBytes);
+        Assert.Equal(0, (await client.GetUsageAsync(new GetUsageRequest { Owner = TestFiles.Organization() })).UsageBytes);
     }
 
     [Fact]

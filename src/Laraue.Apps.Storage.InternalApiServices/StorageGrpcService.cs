@@ -27,7 +27,7 @@ public sealed class StorageGrpcService(IFilesService filesService)
     {
         var serviceId = ReadDomainServiceId(context);
         var data = new UploadData(
-            request.Owner,
+            ToOwnerRef(request.Owner),
             ParseOptionalUserId(request.UserId),
             request.FileName,
             request.ContentType,
@@ -122,7 +122,7 @@ public sealed class StorageGrpcService(IFilesService filesService)
     {
         var serviceId = ReadDomainServiceId(context);
 
-        var usage = await ExecuteAsync(() => filesService.GetUsageAsync(serviceId, request.Owner, context.CancellationToken));
+        var usage = await ExecuteAsync(() => filesService.GetUsageAsync(serviceId, ToOwnerRef(request.Owner), context.CancellationToken));
 
         return new Contracts.GetUsageResponse { UsageBytes = usage };
     }
@@ -149,6 +149,15 @@ public sealed class StorageGrpcService(IFilesService filesService)
             });
         }
     }
+
+    private static OwnerRef ToOwnerRef(Contracts.Owner? owner) => owner?.KindCase switch
+    {
+        Contracts.Owner.KindOneofCase.OrganizationId => new OrganizationOwnerRef(owner.OrganizationId),
+        Contracts.Owner.KindOneofCase.UserId => Guid.TryParse(owner.UserId, out var userId)
+            ? new UserOwnerRef(userId)
+            : throw new RpcException(new Status(StatusCode.InvalidArgument, $"Invalid owner user id '{owner.UserId}'.")),
+        _ => throw new RpcException(new Status(StatusCode.InvalidArgument, "The owner is required.")),
+    };
 
     private static FileBucketRange? ToRange(Contracts.ReadFileRequest request)
     {

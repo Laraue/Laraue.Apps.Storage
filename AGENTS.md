@@ -12,7 +12,8 @@ the app they're in does, over gRPC, and serves the files to its users itself (Bo
 through its own `/api/files/{id}`, so links and permissions stay the app's).
 
 **Stage 1 (BRD-339)**: internal gRPC only (`Protos/storage.proto`, `StorageService`).
-- `UploadFile(owner, user_id?, file_name, content_type, content, quota_bytes?)` -> the stored file,
+- `UploadFile(owner, user_id?, file_name, content_type, content, quota_bytes?)` - `owner` is an
+  `Owner` message, a oneof of `organization_id` or `user_id` - -> the stored file,
   its preview for an image, the owner's usage after the upload, and whether it was a duplicate - or
   `quota_exceeded` (usage, quota, required bytes) with nothing stored.
 - `GetFile(file_id)`, `ReadFile(file_id, range?)` (server streaming: one header message, then 64 KB
@@ -31,9 +32,17 @@ through its own `/api/files/{id}`, so links and permissions stay the app's).
 
 ## Domain model
 
-- `Owner` (table `owners`) - whoever files are stored for, as the calling service names it
-  (`Key`, e.g. Boards' `organization:42`, 1-128 characters), unique per `(ServiceId, Key)`, with
-  `UsageBytes`: the total size of its files, originals and previews. Created on its first upload.
+- `Owner` (table `owners`) - whoever files are stored for, with `UsageBytes`: the total size of its
+  files, originals and previews. Created on its first upload. Abstract, one table (EF table-per-
+  hierarchy, discriminator `Kind`, a check constraint keeps exactly one id column set):
+  - `OrganizationOwner` - `OrganizationId`, the calling service's own organization id (Boards:
+    the organization a file is uploaded in). Unique per `(ServiceId, OrganizationId)`.
+  - `UserOwner` - `UserId`, the global Laraue user id from Identity (e.g. feedback screenshots,
+    BRD-227). Unique per `(ServiceId, UserId)`.
+  Owners are separate per calling service: the same user in two apps has two usages. Typed columns
+  rather than one string key, so ids are validated and nobody parses a separator. Both unique indexes
+  are filtered (`... is not null`), and `FilesService.LockOwner`'s `on conflict` repeats those
+  filters - change them together.
 - `StoredFile` (table `stored_files`) - one file, id a UUIDv7:
   - `Kind` `Original` (in the bucket, `files/<id>`) or `Preview` (on local disk under
     `Storage:PreviewsDirectory`, sharded by the id's last characters, `<id>.webp`).

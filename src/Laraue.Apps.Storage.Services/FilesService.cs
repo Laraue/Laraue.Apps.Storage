@@ -11,8 +11,23 @@ using Microsoft.Extensions.Options;
 
 namespace Laraue.Apps.Storage.Services;
 
+/// <summary>
+/// Whoever a file is stored for: <see cref="OrganizationOwnerRef"/> or <see cref="UserOwnerRef"/>.
+/// </summary>
+public abstract record OwnerRef;
+
+/// <summary>
+/// An organization of the calling service, by the service's own id for it.
+/// </summary>
+public sealed record OrganizationOwnerRef(long OrganizationId) : OwnerRef;
+
+/// <summary>
+/// A Laraue user, by the global user id from Identity.
+/// </summary>
+public sealed record UserOwnerRef(Guid UserId) : OwnerRef;
+
 public sealed record UploadData(
-    string Owner,
+    OwnerRef Owner,
     Guid? UserId,
     string FileName,
     string ContentType,
@@ -71,7 +86,7 @@ public interface IFilesService
     /// </summary>
     Task<FileDeleteResult> DeleteAsync(ServiceId serviceId, Guid fileId, CancellationToken cancellationToken);
 
-    Task<long> GetUsageAsync(ServiceId serviceId, string owner, CancellationToken cancellationToken);
+    Task<long> GetUsageAsync(ServiceId serviceId, OwnerRef owner, CancellationToken cancellationToken);
 }
 
 public sealed class FilesService(
@@ -89,7 +104,7 @@ public sealed class FilesService(
         UploadData data,
         CancellationToken cancellationToken)
     {
-        var ownerKey = ValidateOwner(data.Owner);
+        ValidateOwner(data.Owner);
         var contentType = ValidateContentType(data.ContentType);
         var fileName = NormalizeFileName(data.FileName);
 
@@ -106,10 +121,10 @@ public sealed class FilesService(
         var contentHash = Convert.ToHexStringLower(SHA256.HashData(data.Content));
 
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-        var owner = await LockOwner(serviceId, ownerKey, createIfMissing: true, cancellationToken);
+        var owner = await LockOwner(serviceId, data.Owner, cancellationToken);
 
         var existing = await context.StoredFiles
-            .Where(x => x.OwnerId == owner!.Id)
+            .Where(x => x.OwnerId == owner.Id)
             .Where(x => x.Kind == StoredFileKind.Original)
             .Where(x => x.ContentHash == contentHash)
             .Include(x => x.Preview)
@@ -125,14 +140,14 @@ public sealed class FilesService(
             return new FileUploaded(
                 ToDetails(existing),
                 existing.Preview is null ? null : ToDetails(existing.Preview),
-                owner!.UsageBytes,
+                owner.UsageBytes,
                 Deduplicated: true);
         }
 
         var preview = previewMaker.TryMake(data.Content);
         var requiredBytes = data.Content.Length + (preview?.Length ?? 0);
 
-        if (data.QuotaBytes is { } quota && owner!.UsageBytes + requiredBytes > quota)
+        if (data.QuotaBytes is { } quota && owner.UsageBytes + requiredBytes > quota)
         {
             await transaction.RollbackAsync(cancellationToken);
             metrics.RecordUpload(StorageMetrics.UploadResults.QuotaExceeded);
@@ -144,7 +159,7 @@ public sealed class FilesService(
         var original = new StoredFile
         {
             Id = Guid.CreateVersion7(),
-            OwnerId = owner!.Id,
+            OwnerId = owner.Id,
             Kind = StoredFileKind.Original,
             Location = StoredFileLocation.Bucket,
             StorageKey = string.Empty,
@@ -268,14 +283,20 @@ public sealed class FilesService(
         var file = await context.StoredFiles
             .Where(x => x.Id == fileId)
             .Where(x => x.Owner!.ServiceId == serviceId)
-            .Select(x => new { x.OwnerId, x.Kind, OwnerKey = x.Owner!.Key })
+            .Select(x => new { x.OwnerId, x.Kind, x.Owner!.UsageBytes })
             .FirstOrDefaultAsync(cancellationToken);
 
-        if (file is null || file.Kind != StoredFileKind.Original)
-            return new FileDeleteResult(false, file is null ? 0 : await GetUsageAsync(serviceId, file.OwnerKey, cancellationToken));
+        if (file is null)
+            return new FileDeleteResult(false, 0);
+
+        if (file.Kind != StoredFileKind.Original)
+            return new FileDeleteResult(false, file.UsageBytes);
 
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
-        var owner = await LockOwner(serviceId, file.OwnerKey, createIfMissing: false, cancellationToken);
+        var owner = await context.Owners
+            .FromSqlInterpolated($"select * from owners where id = {file.OwnerId} for update")
+            .AsTracking()
+            .FirstOrDefaultAsync(cancellationToken);
 
         // Read again under the owner's lock: a concurrent delete may have dropped it already.
         var original = await context.StoredFiles
@@ -311,43 +332,80 @@ public sealed class FilesService(
         return new FileDeleteResult(true, owner.UsageBytes);
     }
 
-    public async Task<long> GetUsageAsync(ServiceId serviceId, string owner, CancellationToken cancellationToken)
+    public async Task<long> GetUsageAsync(ServiceId serviceId, OwnerRef owner, CancellationToken cancellationToken)
     {
-        var ownerKey = ValidateOwner(owner);
+        ValidateOwner(owner);
 
-        return await context.Owners
-            .Where(x => x.ServiceId == serviceId)
-            .Where(x => x.Key == ownerKey)
-            .Select(x => x.UsageBytes)
-            .FirstOrDefaultAsync(cancellationToken);
+        return owner switch
+        {
+            OrganizationOwnerRef organization => await context.Owners
+                .OfType<OrganizationOwner>()
+                .Where(x => x.ServiceId == serviceId)
+                .Where(x => x.OrganizationId == organization.OrganizationId)
+                .Select(x => x.UsageBytes)
+                .FirstOrDefaultAsync(cancellationToken),
+            UserOwnerRef user => await context.Owners
+                .OfType<UserOwner>()
+                .Where(x => x.ServiceId == serviceId)
+                .Where(x => x.UserId == user.UserId)
+                .Select(x => x.UsageBytes)
+                .FirstOrDefaultAsync(cancellationToken),
+            _ => throw new ArgumentOutOfRangeException(nameof(owner), owner, null),
+        };
     }
 
     /// <summary>
-    /// Locks the owner's row for the rest of the transaction (creating it first when asked), so uploads and deletes
-    /// for one owner change its usage one at a time.
+    /// Creates the owner's row if it's new and locks it for the rest of the transaction, so uploads and deletes for
+    /// one owner change its usage one at a time. The "on conflict" targets match the filtered unique indexes in
+    /// <c>DatabaseContext</c>.
     /// </summary>
-    private async Task<Owner?> LockOwner(
-        ServiceId serviceId,
-        string ownerKey,
-        bool createIfMissing,
-        CancellationToken cancellationToken)
+    private async Task<Owner> LockOwner(ServiceId serviceId, OwnerRef owner, CancellationToken cancellationToken)
     {
-        if (createIfMissing)
-        {
-            await context.Database.ExecuteSqlInterpolatedAsync(
-                $"""
-                 insert into owners (service_id, key, usage_bytes, created_at)
-                 values ({(int)serviceId}, {ownerKey}, 0, {dateTimeProvider.UtcNow})
-                 on conflict (service_id, key) do nothing
-                 """,
-                cancellationToken);
-        }
+        var now = dateTimeProvider.UtcNow;
 
-        return await context.Owners
-            .FromSqlInterpolated(
-                $"select * from owners where service_id = {(int)serviceId} and key = {ownerKey} for update")
-            .AsTracking()
-            .FirstOrDefaultAsync(cancellationToken);
+        switch (owner)
+        {
+            case OrganizationOwnerRef organization:
+                await context.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     insert into owners (kind, service_id, organization_id, usage_bytes, created_at)
+                     values ({(int)OwnerKind.Organization}, {(int)serviceId}, {organization.OrganizationId}, 0, {now})
+                     on conflict (service_id, organization_id) where organization_id is not null do nothing
+                     """,
+                    cancellationToken);
+
+                return await context.Owners
+                    .FromSqlInterpolated(
+                        $"""
+                         select * from owners
+                         where service_id = {(int)serviceId} and organization_id = {organization.OrganizationId}
+                         for update
+                         """)
+                    .AsTracking()
+                    .SingleAsync(cancellationToken);
+
+            case UserOwnerRef user:
+                await context.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     insert into owners (kind, service_id, user_id, usage_bytes, created_at)
+                     values ({(int)OwnerKind.User}, {(int)serviceId}, {user.UserId}, 0, {now})
+                     on conflict (service_id, user_id) where user_id is not null do nothing
+                     """,
+                    cancellationToken);
+
+                return await context.Owners
+                    .FromSqlInterpolated(
+                        $"""
+                         select * from owners
+                         where service_id = {(int)serviceId} and user_id = {user.UserId}
+                         for update
+                         """)
+                    .AsTracking()
+                    .SingleAsync(cancellationToken);
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(owner), owner, null);
+        }
     }
 
     private async Task WriteContent(StoredFile file, byte[] content, CancellationToken cancellationToken)
@@ -378,13 +436,17 @@ public sealed class FilesService(
         }
     }
 
-    private static string ValidateOwner(string owner)
+    private static void ValidateOwner(OwnerRef? owner)
     {
-        var key = owner.Trim();
-        if (key.Length == 0 || key.Length > Owner.KeyMaxLength)
-            throw new StorageValidationException(string.Format(Errors.OwnerInvalid, Owner.KeyMaxLength));
+        var isValid = owner switch
+        {
+            OrganizationOwnerRef organization => organization.OrganizationId > 0,
+            UserOwnerRef user => user.UserId != Guid.Empty,
+            _ => false,
+        };
 
-        return key;
+        if (!isValid)
+            throw new StorageValidationException(Errors.OwnerInvalid);
     }
 
     private static string ValidateContentType(string contentType)

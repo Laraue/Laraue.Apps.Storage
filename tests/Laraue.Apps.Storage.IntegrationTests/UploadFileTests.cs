@@ -98,8 +98,8 @@ public class UploadFileTests(InternalApiTestHost host) : IClassFixture<InternalA
         var client = host.CreateStorageClient();
         var text = TestFiles.Text("same");
 
-        var first = await client.UploadFileAsync(TestFiles.Upload(text, owner: "organization:1"));
-        var second = await client.UploadFileAsync(TestFiles.Upload(text, owner: "organization:2"));
+        var first = await client.UploadFileAsync(TestFiles.Upload(text, owner: TestFiles.Organization(1)));
+        var second = await client.UploadFileAsync(TestFiles.Upload(text, owner: TestFiles.Organization(2)));
 
         Assert.False(second.Uploaded.Deduplicated);
         Assert.NotEqual(first.Uploaded.File.Id, second.Uploaded.File.Id);
@@ -153,16 +153,43 @@ public class UploadFileTests(InternalApiTestHost host) : IClassFixture<InternalA
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
     }
 
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    public async Task UploadFile_ShouldReturnInvalidArgument_WhenOwnerIsEmpty(string owner)
+    [Fact]
+    public async Task UploadFile_ShouldStoreSeparately_WhenSameContentIsUploadedForUserAndOrganization()
     {
         using var testScope = host.CreateTestScope();
         var client = host.CreateStorageClient();
+        var text = TestFiles.Text("same");
+        var user = new Owner { UserId = Guid.NewGuid().ToString() };
 
-        var exception = await Assert.ThrowsAsync<RpcException>(
-            () => client.UploadFileAsync(TestFiles.Upload(TestFiles.Text("a"), owner: owner)).ResponseAsync);
+        await client.UploadFileAsync(TestFiles.Upload(text, owner: TestFiles.Organization()));
+        var response = await client.UploadFileAsync(TestFiles.Upload(text, owner: user));
+
+        Assert.False(response.Uploaded.Deduplicated);
+        Assert.Equal(text.Length, (await client.GetUsageAsync(new GetUsageRequest { Owner = user })).UsageBytes);
+        Assert.Equal(1, await testScope.Database.Owners.OfType<Domain.UserOwner>().CountAsync());
+        Assert.Equal(1, await testScope.Database.Owners.OfType<Domain.OrganizationOwner>().CountAsync());
+    }
+
+    public static TheoryData<Owner?> InvalidOwners => new()
+    {
+        null,
+        new Owner(),
+        new Owner { OrganizationId = 0 },
+        new Owner { OrganizationId = -5 },
+        new Owner { UserId = "not-a-guid" },
+        new Owner { UserId = Guid.Empty.ToString() },
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidOwners))]
+    public async Task UploadFile_ShouldReturnInvalidArgument_WhenOwnerIsInvalid(Owner? owner)
+    {
+        using var testScope = host.CreateTestScope();
+        var client = host.CreateStorageClient();
+        var request = TestFiles.Upload(TestFiles.Text("a"));
+        request.Owner = owner;
+
+        var exception = await Assert.ThrowsAsync<RpcException>(() => client.UploadFileAsync(request).ResponseAsync);
 
         Assert.Equal(StatusCode.InvalidArgument, exception.StatusCode);
     }
