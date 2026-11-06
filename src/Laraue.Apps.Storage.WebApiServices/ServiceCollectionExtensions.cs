@@ -16,7 +16,8 @@ public static class ServiceCollectionExtensions
         {
             builder.Services
                 .AddSingleton<IDateTimeProvider, DateTimeProvider>()
-                .AddSingleton<FileLinkSigner>();
+                .AddSingleton<FileLinkSigner>()
+                .AddSingleton<IServedFilesService, ServedFilesService>();
 
             AddValidatedOptions<FileLinkOptions>(builder, builder.Configuration.GetSection("FileLinks"));
 

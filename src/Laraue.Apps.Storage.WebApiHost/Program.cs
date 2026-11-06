@@ -16,6 +16,7 @@ public sealed class Program
         builder.Logging.ClearProviders().AddJsonConsole();
 
         builder.AddWebApiServices();
+        builder.Services.AddControllers();
 
         builder.Services
             .AddOpenTelemetry()
@@ -28,7 +29,7 @@ public sealed class Program
 
         var app = builder.Build();
 
-        app.MapFiles();
+        app.MapControllers();
         app.MapHealthChecks("/_health");
         app.MapPrometheusScrapingEndpoint("/_metrics");
 

@@ -123,9 +123,10 @@ directly, only through its own `Host{Services}` project.
   `StorageMetrics`. Invalid input is a `StorageValidationException` with an `Errors.resx` message.
 - `src/Laraue.Apps.Storage.InternalApiServices` - `StorageGrpcService` (wire <-> domain types,
   exceptions -> status codes) and the DI composition (`AddInternalApiServices()`).
-- `src/Laraue.Apps.Storage.WebApiServices` - `FilesEndpoint` (the public route) and its DI
-  (`AddWebApiServices()`); `src/Laraue.Apps.Storage.WebApiHost` - its `Program.cs`, one HTTP/1.1 port
-  (`Urls`, `http://localhost:5565` locally). See "Hosts: internal and public". The generated
+- `src/Laraue.Apps.Storage.WebApiServices` - `ServedFilesService` (checks a link, finds its file) and
+  its DI (`AddWebApiServices()`); `src/Laraue.Apps.Storage.WebApiHost` - `Program.cs` and a thin
+  `FilesController` (headers and the file response), one HTTP/1.1 port (`Urls`,
+  `http://localhost:5565` locally). See "Hosts: internal and public". The generated
   proto types share names with the domain ones (`ServiceId`, `StoredFile`, `QuotaExceeded`), so the
   file aliases them as `Contracts.`/`Domain.`.
 - `src/Laraue.Apps.Storage.InternalApiHost` - the gRPC host: `Program.cs` only (Kestrel h2c, DI,

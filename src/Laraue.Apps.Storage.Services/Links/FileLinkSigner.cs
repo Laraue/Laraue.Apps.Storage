@@ -13,7 +13,10 @@ namespace Laraue.Apps.Storage.Services.Links;
 /// </summary>
 public sealed class FileLinkSigner(IOptions<FileLinkOptions> options)
 {
-    public const string RoutePrefix = "/files";
+    /// <summary>
+    /// The first path segment of a link, the public host's <c>FilesController</c> route.
+    /// </summary>
+    public const string RouteSegment = "files";
 
     public const string ContentTypeParameter = "ct";
     public const string DispositionParameter = "cd";
@@ -26,7 +29,7 @@ public sealed class FileLinkSigner(IOptions<FileLinkOptions> options)
         var signature = Sign(area, key, download.ContentType, download.ContentDisposition, expires);
         var path = string.Join('/', key.Replace('\\', '/').Split('/').Select(Uri.EscapeDataString));
 
-        return $"{baseUrl.TrimEnd('/')}{RoutePrefix}/{Uri.EscapeDataString(area)}/{path}"
+        return $"{baseUrl.TrimEnd('/')}/{RouteSegment}/{Uri.EscapeDataString(area)}/{path}"
             + $"?{ContentTypeParameter}={Uri.EscapeDataString(download.ContentType)}"
             + $"&{DispositionParameter}={Uri.EscapeDataString(download.ContentDisposition)}"
             + $"&{ExpiresParameter}={expires}"
