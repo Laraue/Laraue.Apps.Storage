@@ -118,7 +118,7 @@ directly, only through its own `Host{Services}` project.
   `main` publishes the base `<Version>` from `Directory.Build.props`, any other branch appends
   `-alpha.<run number>`).
 - `src/Laraue.Apps.Storage.Services` - core logic, not tied to gRPC: `FilesService` (upload with
-  dedup and quota, download locations, delete, usage), `Buckets` (`IFileBucket`: `S3FileBucket` for B2,
+  dedup and quota, public URLs, references, usage), `Buckets` (`IFileBucket`: `S3FileBucket` for B2,
   `LocalFileBucket` for tests), `PreviewMaker`,
   `StorageMetrics`. Invalid input is a `StorageValidationException` with an `Errors.resx` message.
 - `src/Laraue.Apps.Storage.InternalApiServices` - `StorageGrpcService` (wire <-> domain types,
