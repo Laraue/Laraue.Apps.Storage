@@ -9,8 +9,8 @@ The internal file storage service for the Laraue.* ecosystem (BRD-226, BRD-339).
 (`Laraue Boards` first; feedback screenshots, BRD-227, later) sends the files its users upload
 here and keeps only the returned file ids. Its API is internal on purpose: users never call it, the app they're in does, over gRPC. File bytes
 never go out through gRPC: the app keeps its own links (Boards' `/api/files/{id}`, so permissions stay
-the app's) and answers them with a redirect to the file's public URL - the bucket behind Cloudflare.
-See "Downloads".
+the app's) and answers them with a redirect to the file's public URL on this service's public host,
+`storage.laraue.com`, behind Cloudflare. See "Downloads".
 
 **Stage 1 (BRD-339)**: internal gRPC only (`Protos/storage.proto`, `StorageService`).
 - `UploadFile(owner, user_id?, file_name, content_type, content, quota_bytes?)`, where `owner` is an
@@ -46,7 +46,8 @@ See "Downloads".
   are filtered (`... is not null`), and `FilesService.LockOwner`'s `on conflict` repeats those
   filters - change them together.
 - `StoredFile` (table `stored_files`) - one file, id a UUIDv7:
-  - `Kind` `Original` (bucket key `files/<id>`) or `Preview` (`previews/<id>.webp`). Both live in
+  - `Kind` `Original` or `Preview`. Both are stored under their own id as the key (the standard GUID string, the `id` callers get; no
+    prefix or extension - the type is in the object's headers), and both live in
     the one bucket; nothing is kept on the server's disk.
   - `ContentHash` - SHA-256 of an original, to find the same upload for the same owner.
   - `References` - its `FileReference` rows, one per upload (see "References"). The file and its
@@ -123,6 +124,9 @@ directly, only through its own `Host{Services}` project.
   `StorageMetrics`. Invalid input is a `StorageValidationException` with an `Errors.resx` message.
 - `src/Laraue.Apps.Storage.InternalApiServices` - `StorageGrpcService` (wire <-> domain types,
   exceptions -> status codes) and the DI composition (`AddInternalApiServices()`).
+- `src/Laraue.Apps.Storage.WebApiServices` - `PublicFilesService` (which keys are files, reading them)
+  and its DI (`AddWebApiServices()`); `src/Laraue.Apps.Storage.WebApiHost` - `Program.cs` and a thin
+  `FilesController`, one HTTP/1.1 port (`Urls`, `http://localhost:5565` locally). See "Downloads".
   The generated
   proto types share names with the domain ones (`ServiceId`, `StoredFile`, `QuotaExceeded`), so the
   file aliases them as `Contracts.`/`Domain.`.
@@ -135,41 +139,44 @@ directly, only through its own `Host{Services}` project.
 - `tests/Laraue.Apps.Storage.IntegrationTests` - a `WebApplicationFactory<Program>` host that hands
   back the real generated gRPC client over the in-memory `TestServer`. Files go to a temp folder
   instead of B2 (`RecordingFileBucket`, which also remembers each object's headers), `Storage:PublicBaseUrl`
-  is that folder's `file://` URL so files' URLs point into it.
+  is that folder's `file://` URL so files' URLs point into it, and `host.PublicHost` (`WebApiTestHost`)
+  is the public host over the same folder.
   `using var testScope = host.CreateTestScope();` cleans the database and the folder; test classes are
   `[Collection("IntegrationTest")]`.
 
 ## Downloads
 
-Every file has one public, permanent URL: `{Storage:PublicBaseUrl}/{key}`, e.g.
-`https://files.laraue.com/file/laraue-files/previews/<id>.webp`. The bucket is public, and the files
-domain is a Cloudflare-proxied CNAME to it, so Cloudflare caches files at its edge for free and B2 ->
-Cloudflare traffic is free (Bandwidth Alliance); B2 only sees cache misses. Nothing is signed and links
-don't expire.
+Every file has one public, permanent URL: `{Storage:PublicBaseUrl}/{key}`, i.e.
+`https://storage.laraue.com/<id>`, for an original and a preview alike.
+- **The public host** (`WebApiHost`) answers it: it streams the object from the **private** bucket with
+  a read-only key and the headers stored at upload. It has no database and no gRPC, and serves only keys
+  by id - the route takes a GUID (`{id:guid}`) and `PublicFilesService` reads only that key; anything else, a deleted file included, is 404.
+  It always sends the whole file.
+- **Cloudflare** proxies `storage.laraue.com` and caches every response for a day (a cache rule makes the
+  extension-less originals cacheable too), so only cache misses reach the host and B2. Byte ranges
+  (video seeking) are served by Cloudflare from its cached copy. `storage_public_reads_total{result}`
+  counts what reached the host.
+- **Why not a public bucket:** Backblaze only allows public buckets on accounts with a payment method.
+  The private bucket plus this host needs none, and the bucket key never leaves the server.
 - **Access** is knowing the URL: its key holds the file's UUIDv7, which isn't guessable and is only
   learned from data a user could read - the same model as Boards' own `/api/files/{id}`, which checks no
-  permission either. Keys can't be listed without the application key.
-- **Headers are fixed at upload** (`FileObjectHeaders`, stored with the object, B2 answers every
-  download with them): the content type; `inline` for images and videos (not SVG), otherwise
-  `attachment; filename=...` with the stored name - so a deduplicated file keeps its first upload's
-  name; and `public, max-age=86400`.
+  permission either.
+- **Headers are fixed at upload** (`FileObjectHeaders`, stored with the object): the content type;
+  `inline` for images and videos (not SVG), otherwise `attachment; filename=...` with the stored name -
+  so a deduplicated file keeps its first upload's name; and `public, max-age=86400`. The host adds
+  `nosniff` and `Content-Security-Policy: sandbox; default-src 'none'`.
 - **Deleting** removes the object from B2 but purges nothing: Cloudflare and browsers may serve a
   deleted file for up to a day (the `max-age`), to whoever already has its URL. That window is accepted
-  (2026-11-06) in exchange for no Cloudflare API token and no purge code. A key's content never
-  changes, so the day only bounds how long deleted files linger; Cloudflare refetches from B2 about once
-  a day per cached file, which costs practically nothing.
-  Browsers that already downloaded a file keep their copy.
-- `nosniff` and a sandbox CSP come from a Cloudflare response-header rule on the files domain, which
-  never serves an app's pages.
+  (2026-11-06) in exchange for no Cloudflare API token and no purge code.
 
 ## The bucket
 
 - A Backblaze B2 bucket of its own, separate from the restic backup bucket, reached through the
-  S3-compatible API (`AWSSDK.S3`) with an application key limited to this bucket. The bucket is
-  public (`allPublic`). The key needs write, **list and delete**: B2 keeps every version of a file by
-  default, and a plain
+  S3-compatible API (`AWSSDK.S3`). The bucket is **private**. Two application keys, both limited
+  to this bucket: the internal host's needs write, **list and delete** (B2 keeps every version of a file
+  by default, and a plain
   `DeleteObject` only hides it (still stored and billed), so `S3FileBucket.Delete` lists and deletes
-  each version.
+  each version); the public host's only reads.
 - The SDK's default CRC checksum headers are turned off (`WHEN_REQUIRED`) and payloads are signed in
   one piece (`UseChunkEncoding = false`), for S3-compatible APIs that don't take them.
 - Writes happen before the database commit, deletes after it: a failure leaves unused bytes behind
@@ -187,11 +194,14 @@ Settings `InternalApiHost` needs:
   in `appsettings.json`, not as defaults in the options class; production doesn't override them.
 - `Bucket:ServiceUrl`, `Bucket:Region`, `Bucket:BucketName`, `Bucket:KeyId`, `Bucket:ApplicationKey`
   - not committed; Production validates them at startup.
-- `Storage:PublicBaseUrl` - the bucket's URL on the files domain (`https://files.laraue.com/file/<bucket>`).
-  Production validates it; set it in `appsettings.Development.json` for local runs.
+- `Storage:PublicBaseUrl` - where the public host is reached (`https://storage.laraue.com`). Production
+  validates it; for local runs set it to the local public host, `http://localhost:5565`, in
+  `appsettings.Development.json`.
 - `Bucket:LocalDirectory` - tests and local runs without a bucket: files go to that folder instead of
-  B2 and the `Bucket:*` credentials aren't needed. To click through downloads locally, point `Bucket:*`
-  and `Storage:PublicBaseUrl` at a development B2 bucket (or a local S3 server, MinIO) instead.
+  B2 and the `Bucket:*` credentials aren't needed. Set the same folder for both hosts locally.
+
+Settings `WebApiHost` needs: `Bucket:*` with the **read-only** key (validated in production), or
+`Bucket:LocalDirectory` locally; `Urls` (committed as `http://localhost:5565`).
 
 ## EF Core
 
@@ -216,7 +226,8 @@ conventions as Feedback/Identity/Billing: labels are low-cardinality - never an 
 - Counters (`StorageMetrics`, events, every label value starts at zero):
   `storage_uploads_total{result}` (stored, deduplicated, quota_exceeded) and
   `storage_bucket_failures_total{operation}` (write, delete) - the Infra alert on bucket errors
-  watches the latter.
+  watches the latter. The public host (its own `/_metrics`) counts `storage_public_reads_total{result}`
+  (served - a Cloudflare cache miss - and not_found).
 - Gauges (`StorageStateMetrics`, read from the database every 60 s by a background service, a scrape
   only reads the last snapshot): `storage_stored_bytes{kind}` and `storage_stored_files{kind}`
   (`original`, `preview` - all in the bucket, so the sum is what B2 bills), `storage_owners{kind}` (organizations and users with files) and
@@ -236,17 +247,17 @@ Don't kill it - ask the user to stop it, then retry.
 
 ## Deploy
 
-Same shape as Feedback's `.github/workflows/dotnet.yml`: the `deploy` job (push to `main` only, GitHub
-environment `internalapi-production`, approved by hand) packs `InternalApiHost`'s output, uploads it
-to `/home/laraue/storage-internal-api-host` and rebuilds/restarts the `storage-internal-api-host`
-compose service. Set up once by a human, not in this repo: the compose service (`Laraue.Apps.Infra`,
-`services/storage-internal-api-host/`), the database `laraue_storage` (created by the migrations on
-first start), the `Bucket__*` and `Storage__PublicBaseUrl` values in the server's `.env`,
-the public B2 bucket and its key, the Cloudflare side of the files domain (a proxied CNAME to the
-bucket's B2 host, a cache rule caching everything on it, a response-header rule adding `nosniff` and
-`Content-Security-Policy: sandbox; default-src 'none'`), and this repo's GitHub
-environment/secrets
-(`SSH_*`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` for deploy notifications, `NUGET_USER` for publishing).
+Same shape as Billing's `.github/workflows/dotnet.yml`: the `deploy` job (push to `main` only) deploys
+two hosts, each behind its own GitHub environment approved by hand - `InternalApiHost` (environment
+`internalapi-production`, to `/home/laraue/storage-internal-api-host`, compose service
+`storage-internal-api-host`) and `WebApiHost` (environment `webapi-production`, to
+`/home/laraue/storage-web-api-host`, compose service `storage-web-api-host`). Set up once by a human, not
+in this repo: both compose services and the nginx site for `storage.laraue.com` (`Laraue.Apps.Infra`), the
+database `laraue_storage` (created by the migrations on first start), the `STORAGE_*` values in the
+server's `.env`, the private B2 bucket and its two keys, the Cloudflare side of `storage.laraue.com` (a
+proxied DNS record to the server, a cache rule caching everything on it), and this repo's GitHub
+environments/secrets (`SSH_*`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` for deploy notifications,
+`NUGET_USER` for publishing).
 
 ## Testing
 

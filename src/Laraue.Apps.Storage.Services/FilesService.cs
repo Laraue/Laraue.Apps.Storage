@@ -171,7 +171,7 @@ public sealed class FilesService(
             UploadedByUserId = data.UserId,
             CreatedAt = now,
         };
-        original.StorageKey = GetOriginalKey(original.Id);
+        original.StorageKey = GetStorageKey(original.Id);
 
         StoredFile? previewFile = null;
         if (preview is not null)
@@ -189,7 +189,7 @@ public sealed class FilesService(
                 UploadedByUserId = data.UserId,
                 CreatedAt = now,
             };
-            previewFile.StorageKey = GetPreviewKey(previewFile.Id);
+            previewFile.StorageKey = GetStorageKey(previewFile.Id);
         }
 
         FileReference newReference;
@@ -578,8 +578,10 @@ public sealed class FilesService(
         return value.ToString();
     }
 
-    private static string GetOriginalKey(Guid fileId) => $"files/{fileId:N}";
-
-    private static string GetPreviewKey(Guid fileId) => $"previews/{fileId:N}.webp";
+    /// <summary>
+    /// Originals and previews alike: the file's own id, formatted like the <c>id</c> callers get. Its type lives in
+    /// the object's headers, not in the key.
+    /// </summary>
+    public static string GetStorageKey(Guid fileId) => fileId.ToString();
 
 }

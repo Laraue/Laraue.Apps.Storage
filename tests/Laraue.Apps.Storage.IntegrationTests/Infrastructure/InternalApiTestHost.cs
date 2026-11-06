@@ -22,6 +22,13 @@ public class InternalApiTestHost : WebApplicationFactory<Program>
 
     public RecordingFileBucket Bucket { get; }
 
+    private WebApiTestHost? _publicHost;
+
+    /// <summary>
+    /// The public host (<c>storage.laraue.com</c>) over the same bucket folder.
+    /// </summary>
+    public WebApiTestHost PublicHost => _publicHost ??= new WebApiTestHost(BucketDirectory);
+
     public InternalApiTestHost()
     {
         Bucket = new RecordingFileBucket(BucketDirectory);
@@ -91,6 +98,7 @@ public class InternalApiTestHost : WebApplicationFactory<Program>
 
     protected override void Dispose(bool disposing)
     {
+        _publicHost?.Dispose();
         base.Dispose(disposing);
 
         var root = Directory.GetParent(BucketDirectory)!.FullName;

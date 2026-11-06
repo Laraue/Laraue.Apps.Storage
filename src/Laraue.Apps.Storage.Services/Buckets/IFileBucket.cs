@@ -1,9 +1,9 @@
 namespace Laraue.Apps.Storage.Services.Buckets;
 
 /// <summary>
-/// Where file bytes are kept, originals and previews alike: <see cref="S3FileBucket"/> (B2) in production,
-/// <see cref="LocalFileBucket"/> in tests. Bytes are only written and deleted here; clients download them from the
-/// public files domain (<c>Storage:PublicBaseUrl</c>), never through this service.
+/// Where file bytes are kept, originals and previews alike: <see cref="S3FileBucket"/> (a private B2 bucket) in
+/// production, <see cref="LocalFileBucket"/> in tests. The internal host writes and deletes; the public web host
+/// reads (with a read-only key) and streams files to Cloudflare, which caches them.
 /// </summary>
 public interface IFileBucket
 {
@@ -12,6 +12,12 @@ public interface IFileBucket
     /// replacing what was there. <paramref name="headers"/> are stored with the object and sent with every download.
     /// </summary>
     Task Write(string key, Stream content, FileObjectHeaders headers, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Opens the object with the headers it was written with, or returns null when there's no such object. The
+    /// caller disposes it.
+    /// </summary>
+    Task<FileObject?> Read(string key, CancellationToken cancellationToken);
 
     /// <summary>
     /// Deletes the object. Deleting a missing one is not an error.
@@ -24,3 +30,11 @@ public interface IFileBucket
 /// (<c>inline</c> or <c>attachment; filename=...</c>).
 /// </summary>
 public sealed record FileObjectHeaders(string ContentType, string ContentDisposition, string CacheControl);
+
+/// <summary>
+/// An object being read: its content (<see cref="Length"/> bytes) and the headers stored with it.
+/// </summary>
+public sealed record FileObject(Stream Content, long Length, FileObjectHeaders Headers) : IAsyncDisposable
+{
+    public ValueTask DisposeAsync() => Content.DisposeAsync();
+}

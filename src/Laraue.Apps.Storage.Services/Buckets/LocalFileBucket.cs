@@ -1,25 +1,45 @@
+using System.Text.Json;
+
 namespace Laraue.Apps.Storage.Services.Buckets;
 
 /// <summary>
-/// <see cref="IFileBucket"/> over a local directory, for tests (<c>Bucket:LocalDirectory</c>). Headers aren't kept.
-/// With <c>Storage:PublicBaseUrl</c> set to the directory's <c>file://</c> URL, the files' URLs point into it.
+/// <see cref="IFileBucket"/> over a local directory, for tests and local runs without a bucket
+/// (<c>Bucket:LocalDirectory</c>). An object's headers are kept next to it in <c>&lt;key&gt;.headers.json</c>, as a
+/// bucket keeps them with the object.
 /// </summary>
 public class LocalFileBucket(string directory) : IFileBucket
 {
+    private const string HeadersSuffix = ".headers.json";
+
     public async Task Write(string key, Stream content, FileObjectHeaders headers, CancellationToken cancellationToken)
     {
         var path = GetPath(key);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
-        await using var fileStream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
-        await content.CopyToAsync(fileStream, cancellationToken);
+        await using (var fileStream = System.IO.File.Create(path))
+            await content.CopyToAsync(fileStream, cancellationToken);
+
+        await System.IO.File.WriteAllTextAsync(path + HeadersSuffix, JsonSerializer.Serialize(headers), cancellationToken);
+    }
+
+    public async Task<FileObject?> Read(string key, CancellationToken cancellationToken)
+    {
+        var path = GetPath(key);
+        if (!System.IO.File.Exists(path) || !System.IO.File.Exists(path + HeadersSuffix))
+            return null;
+
+        var headers = JsonSerializer.Deserialize<FileObjectHeaders>(
+            await System.IO.File.ReadAllTextAsync(path + HeadersSuffix, cancellationToken))!;
+        var stream = System.IO.File.OpenRead(path);
+
+        return new FileObject(stream, stream.Length, headers);
     }
 
     public Task Delete(string key, CancellationToken cancellationToken)
     {
         var path = GetPath(key);
-        if (System.IO.File.Exists(path))
-            System.IO.File.Delete(path);
+        System.IO.File.Delete(path);
+        System.IO.File.Delete(path + HeadersSuffix);
 
         return Task.CompletedTask;
     }
