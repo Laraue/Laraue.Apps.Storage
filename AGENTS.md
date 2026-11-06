@@ -12,8 +12,8 @@ the app they're in does, over gRPC, and serves the files to its users itself (Bo
 through its own `/api/files/{id}`, so links and permissions stay the app's).
 
 **Stage 1 (BRD-339)**: internal gRPC only (`Protos/storage.proto`, `StorageService`).
-- `UploadFile(owner, user_id?, file_name, content_type, content, quota_bytes?)` - `owner` is an
-  `Owner` message, a oneof of `organization_id` or `user_id` - -> the stored file,
+- `UploadFile(owner, user_id?, file_name, content_type, content, quota_bytes?)`, where `owner` is an
+  `Owner` message (a oneof of `organization_id` or `user_id`) -> the stored file,
   its preview for an image, the owner's usage after the upload, and whether it was a duplicate - or
   `quota_exceeded` (usage, quota, required bytes) with nothing stored.
 - `GetFile(file_id)`, `ReadFile(file_id, range?)` (server streaming: one header message, then 64 KB
