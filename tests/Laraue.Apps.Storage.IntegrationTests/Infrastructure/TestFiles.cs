@@ -69,8 +69,8 @@ public static class TestFiles
     }
 
     /// <summary>
-    /// Asks for the file's download link and downloads it from the test host's local-files endpoint, the way a
-    /// client follows the redirect.
+    /// Asks for the file's download link and downloads it from the public host, the way a client follows the
+    /// redirect.
     /// </summary>
     public static async Task<byte[]> Download(
         this InternalApiTestHost host,
@@ -79,6 +79,6 @@ public static class TestFiles
     {
         var location = await client.GetDownloadUrlAsync(new GetDownloadUrlRequest { FileId = fileId });
 
-        return await host.CreateClient().GetByteArrayAsync(location.Url);
+        return await host.PublicHost.CreateClient().GetByteArrayAsync(location.Url);
     }
 }

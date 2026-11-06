@@ -7,18 +7,18 @@ obvious from the code alone.
 
 The internal file storage service for the Laraue.* ecosystem (BRD-226, BRD-339). A Laraue app
 (`Laraue Boards` first; feedback screenshots, BRD-227, later) sends the files its users upload
-here and keeps only the returned file ids. It is internal on purpose: users never call it directly,
-the app they're in does, over gRPC. File bytes never pass through gRPC on the way out: the app keeps
-its own links (Boards' `/api/files/{id}`, so permissions stay the app's) and answers them with a
-redirect to where the bytes are - see "Downloads".
+here and keeps only the returned file ids. Its API is internal on purpose: users never call it, the app they're in does, over gRPC. File bytes
+never go out through gRPC: the app keeps its own links (Boards' `/api/files/{id}`, so permissions stay
+the app's) and answers them with a redirect to a signed link - to the bucket, or to this service's
+small public web host for files on the server's disk. See "Downloads".
 
 **Stage 1 (BRD-339)**: internal gRPC only (`Protos/storage.proto`, `StorageService`).
 - `UploadFile(owner, user_id?, file_name, content_type, content, quota_bytes?)`, where `owner` is an
   `Owner` message (a oneof of `organization_id` or `user_id`) -> the stored file,
   its preview for an image, the owner's usage after the upload, and whether it was a duplicate - or
   `quota_exceeded` (usage, quota, required bytes) with nothing stored.
-- `GetFile(file_id)`, `GetDownloadUrl(file_id, attachment, download_file_name?)` (a signed bucket
-  link, or a previews path for nginx - see "Downloads"),
+- `GetFile(file_id)`, `GetDownloadUrl(file_id, attachment, download_file_name?)` (a signed link to
+  redirect to - see "Downloads"),
   `DeleteFile(file_id)`, `GetUsage(owner)`.
 - Every call needs the `x-laraue-service-id` header, and a service only sees its own files: another
   service's file id is `NOT_FOUND`.
@@ -102,8 +102,10 @@ directly, only through its own `Host{Services}` project.
   `LocalFileBucket` for previews and for originals in local runs/tests), `PreviewMaker`,
   `StorageMetrics`. Invalid input is a `StorageValidationException` with an `Errors.resx` message.
 - `src/Laraue.Apps.Storage.InternalApiServices` - `StorageGrpcService` (wire <-> domain types,
-  exceptions -> status codes), the DI composition (`AddInternalApiServices()`) and
-  `LocalFilesEndpoint` (local runs and tests only, see "Downloads"). The generated
+  exceptions -> status codes) and the DI composition (`AddInternalApiServices()`).
+- `src/Laraue.Apps.Storage.WebApiServices` - `FilesEndpoint` (the public route) and its DI
+  (`AddWebApiServices()`); `src/Laraue.Apps.Storage.WebApiHost` - its `Program.cs`, one HTTP/1.1 port
+  (`Urls`, `http://localhost:5565` locally). See "Hosts: internal and public". The generated
   proto types share names with the domain ones (`ServiceId`, `StoredFile`, `QuotaExceeded`), so the
   file aliases them as `Contracts.`/`Domain.`.
 - `src/Laraue.Apps.Storage.InternalApiHost` - the gRPC host: `Program.cs` only (Kestrel h2c, DI,
@@ -113,27 +115,43 @@ directly, only through its own `Host{Services}` project.
   and cleartext HTTP/2 on one endpoint without TLS; don't "simplify" it back to one port.
   `MaxReceiveMessageSize` is 32 MB, since an upload is one message with the whole file.
 - `tests/Laraue.Apps.Storage.IntegrationTests` - a `WebApplicationFactory<Program>` host that hands
-  back the real generated gRPC client over the in-memory `TestServer`. Originals and previews go to
+  back the real generated gRPC client over the in-memory `TestServer`, and `host.PublicHost`
+  (`WebApiTestHost`), the public host over the same folders with the same signing key, which tests
+  download links through. Originals and previews go to
   temp folders (`Bucket:LocalDirectory`, `Storage:PreviewsDirectory`), so no test reaches B2.
   `using var testScope = host.CreateTestScope();` cleans the database; test classes are
   `[Collection("IntegrationTest")]`.
 
 ## Downloads
 
-`GetDownloadUrl` says where the caller sends its client; the caller answers its own link with it:
+`GetDownloadUrl` returns a signed link the caller redirects its client to (302), with its expiry:
 - **Originals** (the bucket): a presigned S3 GET link (`S3FileBucket.GetDownloadUrl`, signed locally,
   no request to B2), valid `Storage:DownloadUrlLifetime` (30 min by default - long enough for a video's
   range requests on the same link). `response-content-type` and `response-content-disposition` make B2
   answer with the stored type and `inline` or `attachment; filename=...` (the caller's name for the
-  download). The caller redirects (302); B2 serves byte ranges itself. Files then come from B2's domain,
-  never the app's, so an uploaded file can't run as a page on the app's origin.
-- **Previews** (local disk): `internal_path`, the path under the previews volume. The caller answers
-  with `X-Accel-Redirect` to an `internal` nginx location that has the volume mounted read-only, so
-  previews (read on every board render) are served by nginx with caching, no B2 request and no .NET.
-- **Local runs and tests**: no B2 and no nginx. With `Storage:LocalFilesBaseUrl` set (e.g.
-  `http://localhost:5564/_local-files`), both kinds get links to `LocalFilesEndpoint` on this host,
-  which serves files with ranges, the given type and disposition. It isn't mapped when the setting is
-  empty, which it always is in production.
+  download). B2 serves byte ranges itself.
+- **Previews** (this server's disk): a link to the public web host (`WebApiHost`,
+  `{Storage:PublicBaseUrl}/files/previews/<key>?ct=..&cd=..&exp=..&sig=..`), signed by
+  `FileLinkSigner` (HMAC-SHA256 over area, key, type, disposition and expiry, key `FileLinks:SigningKey`
+  shared by both hosts). It expires at the end of tomorrow (UTC), so the link is the same all day and
+  browsers cache the preview (`Cache-Control: private, max-age` up to the expiry) while boards re-render.
+- In local runs and tests, originals with `Bucket:LocalDirectory` get the same kind of link
+  (`/files/originals/...`) instead of a B2 one.
+
+Files are always served from a domain of their own (B2's, or the public host's, e.g.
+`files.laraue.com`), never an app's, so an uploaded file can't run as a page on the app's origin. The
+public host also sends `nosniff` and a sandbox CSP.
+
+## Hosts: internal and public
+
+- `InternalApiHost` - gRPC (HTTP/2 port) plus `/_health`/`/_metrics` (HTTP/1.1 port), on the docker
+  network only. Owns the database and the bucket, and writes the previews volume. Nothing public.
+- `WebApiHost` - the public side, behind nginx: one route, `GET /files/{area}/{key}`, serving
+  `previews` from its own read-only mount of the previews volume (and `originals` from
+  `Bucket:LocalDirectory` in local runs/tests). It has no database, no bucket credentials and no
+  gRPC: a valid signature and expiry are the only permission, and a wrong or expired link, an unknown
+  area, a path outside the folder and a missing file are all 404, so it says nothing about which files
+  exist. `/_health` and `/_metrics` are for the docker network; nginx proxies `/files/` only.
 
 ## The bucket
 
@@ -161,9 +179,17 @@ Settings `InternalApiHost` needs:
 - `Bucket:ServiceUrl`, `Bucket:Region`, `Bucket:BucketName`, `Bucket:KeyId`, `Bucket:ApplicationKey`
   - not committed; Production validates them at startup.
 - `Storage:DownloadUrlLifetime` - optional, 30 minutes by default.
+- `Storage:PublicBaseUrl` - where clients reach `WebApiHost` (`https://files.laraue.com`). Committed
+  as `http://localhost:5565` for local runs.
+- `FileLinks:SigningKey` - at least 32 characters, the same in both hosts. Not committed; put a
+  local one in both hosts' `appsettings.Development.json` (git-ignored).
 - `Bucket:LocalDirectory` - local runs and tests only: originals go to that folder instead of B2, and
-  the `Bucket:*` credentials aren't needed. With `Storage:LocalFilesBaseUrl` (see "Downloads"). Put
-  both in `appsettings.Development.json` (git-ignored).
+  the `Bucket:*` credentials aren't needed. Set it in both hosts' `appsettings.Development.json`, so the
+  public host serves those originals too.
+
+Settings `WebApiHost` needs: `Storage:PreviewsDirectory` (the same volume, mounted read-only),
+`FileLinks:SigningKey`, and `Bucket:LocalDirectory` only in local runs. Its committed
+`appsettings.json` points at the internal host's local previews folder and listens on 5565.
 
 ## EF Core
 
@@ -202,14 +228,17 @@ Don't kill it - ask the user to stop it, then retry.
 
 ## Deploy
 
-Same shape as Feedback's `.github/workflows/dotnet.yml`: the `deploy` job (push to `main` only, GitHub
-environment `internalapi-production`, approved by hand) packs `InternalApiHost`'s output, uploads it
-to `/home/laraue/storage-internal-api-host` and rebuilds/restarts the `storage-internal-api-host`
-compose service. The compose service (`Laraue.Apps.Infra`, `services/storage-internal-api-host/`), the
-database `laraue_storage` (created by the migrations on first start), the previews volume, the
-`Bucket__*` values in the server's `.env` and this repo's GitHub environment/secrets (`SSH_*`,
-`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` for deploy notifications, `NUGET_USER` for publishing) are set
-up once by a human - they aren't in this repo.
+Same shape as Billing's `.github/workflows/dotnet.yml`: the `deploy` job (push to `main` only) deploys
+two hosts, each behind its own GitHub environment approved by hand - `InternalApiHost` (environment
+`internalapi-production`, to `/home/laraue/storage-internal-api-host`, compose service
+`storage-internal-api-host`) and `WebApiHost` (environment `webapi-production`, to
+`/home/laraue/storage-web-api-host`, compose service `storage-web-api-host`). Set up once by a human,
+not in this repo: both compose services (`Laraue.Apps.Infra`, `services/storage-*/`), the database
+`laraue_storage` (created by the migrations on first start), the previews volume (read-write in the
+internal host, read-only in the web host), the `Bucket__*` and `FileLinks__SigningKey` values in the
+server's `.env`, the `files.laraue.com` DNS record, certificate and nginx site (proxying `/files/` only),
+and this repo's GitHub environments/secrets (`SSH_*`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` for deploy
+notifications, `NUGET_USER` for publishing).
 
 ## Testing
 

@@ -1,11 +1,11 @@
 using System.Net;
 using System.Net.Http.Headers;
 using Grpc.Core;
-using Grpc.Core.Interceptors;
 using Laraue.Apps.Storage.Internal.Contracts;
 using Laraue.Apps.Storage.IntegrationTests.Infrastructure;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.Extensions.Configuration;
+using Laraue.Apps.Storage.Services.Buckets;
+using Laraue.Apps.Storage.Services.Links;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Laraue.Apps.Storage.IntegrationTests;
 
@@ -20,14 +20,15 @@ public class GetDownloadUrlTests(InternalApiTestHost host) : IClassFixture<Inter
         var fileId = await Upload(client, "hello");
 
         var location = await client.GetDownloadUrlAsync(new GetDownloadUrlRequest { FileId = fileId });
-        var response = await host.CreateClient().GetAsync(location.Url);
+        var response = await host.PublicHost.CreateClient().GetAsync(location.Url);
 
-        Assert.Equal(GetDownloadUrlResponse.LocationOneofCase.Url, location.LocationCase);
         Assert.NotNull(location.ExpiresAt);
         Assert.Equal("notes.txt", location.File.FileName);
         Assert.Equal(5, location.File.Size);
         Assert.Equal("text/plain", response.Content.Headers.ContentType!.MediaType);
         Assert.Equal("inline", response.Content.Headers.ContentDisposition!.DispositionType);
+        Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.Equal("sandbox; default-src 'none'", response.Headers.GetValues("Content-Security-Policy").Single());
         Assert.Equal("hello", await response.Content.ReadAsStringAsync());
     }
 
@@ -44,7 +45,7 @@ public class GetDownloadUrlTests(InternalApiTestHost host) : IClassFixture<Inter
             Attachment = true,
             DownloadFileName = "отчёт.txt",
         });
-        var response = await host.CreateClient().GetAsync(location.Url);
+        var response = await host.PublicHost.CreateClient().GetAsync(location.Url);
 
         var disposition = response.Content.Headers.ContentDisposition!;
         Assert.Equal("attachment", disposition.DispositionType);
@@ -52,7 +53,7 @@ public class GetDownloadUrlTests(InternalApiTestHost host) : IClassFixture<Inter
     }
 
     [Fact]
-    public async Task GetDownloadUrl_ShouldReturnLinkServingRanges_WhenFileIsOriginal()
+    public async Task GetDownloadUrl_ShouldReturnLinkServingRanges_WhenRangeIsAsked()
     {
         using var testScope = host.CreateTestScope();
         var client = host.CreateStorageClient();
@@ -61,32 +62,101 @@ public class GetDownloadUrlTests(InternalApiTestHost host) : IClassFixture<Inter
         var location = await client.GetDownloadUrlAsync(new GetDownloadUrlRequest { FileId = fileId });
         var request = new HttpRequestMessage(HttpMethod.Get, location.Url);
         request.Headers.Range = new RangeHeaderValue(2, 5);
-        var response = await host.CreateClient().SendAsync(request);
+        var response = await host.PublicHost.CreateClient().SendAsync(request);
 
         Assert.Equal(HttpStatusCode.PartialContent, response.StatusCode);
         Assert.Equal("2345", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]
-    public async Task GetDownloadUrl_ShouldReturnInternalPath_WhenPreviewIsServedByNginx()
+    public async Task GetDownloadUrl_ShouldReturnSameCacheableLink_WhenPreviewIsAskedTwice()
     {
-        // Production: no local-files endpoint, so a preview is a path under the previews volume for nginx.
-        using var productionLike = host.WithWebHostBuilder(builder => builder.ConfigureAppConfiguration(
-            config => config.AddInMemoryCollection(new Dictionary<string, string?> { ["Storage:LocalFilesBaseUrl"] = "" })));
         using var testScope = host.CreateTestScope();
-        var client = new StorageService.StorageServiceClient(
-            global::Grpc.Net.Client.GrpcChannel
-                .ForAddress(productionLike.Server.BaseAddress, new global::Grpc.Net.Client.GrpcChannelOptions { HttpClient = productionLike.CreateDefaultClient() })
-                .Intercept(new ServiceIdInterceptor(ServiceId.LaraueBoards)));
+        var client = host.CreateStorageClient();
         var uploaded = (await client.UploadFileAsync(TestFiles.Upload(TestFiles.Png(800, 600), "a.png", "image/png"))).Uploaded;
 
-        var location = await client.GetDownloadUrlAsync(new GetDownloadUrlRequest { FileId = uploaded.Preview.Id });
+        var first = await client.GetDownloadUrlAsync(new GetDownloadUrlRequest { FileId = uploaded.Preview.Id });
+        var second = await client.GetDownloadUrlAsync(new GetDownloadUrlRequest { FileId = uploaded.Preview.Id });
+        var response = await host.PublicHost.CreateClient().GetAsync(first.Url);
 
-        Assert.Equal(GetDownloadUrlResponse.LocationOneofCase.InternalPath, location.LocationCase);
-        Assert.Null(location.ExpiresAt);
-        Assert.EndsWith($"{Guid.Parse(uploaded.Preview.Id):N}.webp", location.InternalPath);
-        Assert.True(File.Exists(Path.Combine(host.PreviewsDirectory, location.InternalPath)));
-        Assert.Equal(HttpStatusCode.NotFound, (await productionLike.CreateClient().GetAsync("/_local-files/previews/" + location.InternalPath)).StatusCode);
+        Assert.Equal(first.Url, second.Url);
+        Assert.Equal(DateTime.UtcNow.Date.AddDays(2), first.ExpiresAt.ToDateTime());
+        Assert.Equal("image/webp", response.Content.Headers.ContentType!.MediaType);
+        Assert.True(response.Headers.CacheControl!.Private);
+        Assert.True(response.Headers.CacheControl.MaxAge > TimeSpan.FromDays(1));
+    }
+
+    [Fact]
+    public async Task PublicHost_ShouldReturnNotFound_WhenSignatureIsWrong()
+    {
+        using var testScope = host.CreateTestScope();
+        var client = host.CreateStorageClient();
+        var fileId = await Upload(client, "hello");
+        var location = await client.GetDownloadUrlAsync(new GetDownloadUrlRequest { FileId = fileId });
+
+        var response = await host.PublicHost.CreateClient().GetAsync(location.Url[..^4] + "AAAA");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PublicHost_ShouldReturnNotFound_WhenSignedValueIsChanged()
+    {
+        using var testScope = host.CreateTestScope();
+        var client = host.CreateStorageClient();
+        var fileId = await Upload(client, "<script>alert(1)</script>");
+        var location = await client.GetDownloadUrlAsync(new GetDownloadUrlRequest { FileId = fileId });
+
+        var response = await host.PublicHost.CreateClient().GetAsync(location.Url.Replace("ct=text%2Fplain", "ct=text%2Fhtml"));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PublicHost_ShouldReturnNotFound_WhenLinkIsExpired()
+    {
+        using var testScope = host.CreateTestScope();
+        var client = host.CreateStorageClient();
+        var uploaded = (await client.UploadFileAsync(TestFiles.Upload(TestFiles.Text("hello")))).Uploaded;
+        var key = $"files/{Guid.Parse(uploaded.File.Id):N}";
+        var signer = host.Services.GetRequiredService<FileLinkSigner>();
+
+        var url = signer.CreateUrl(
+            "http://localhost",
+            LocalFileBucket.OriginalsArea,
+            key,
+            new FileDownload("text/plain", "inline", DateTime.UtcNow.AddMinutes(-1)));
+        var response = await host.PublicHost.CreateClient().GetAsync(url);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task PublicHost_ShouldReturnNotFound_WhenSignedKeyLeavesTheDirectory()
+    {
+        var signer = host.Services.GetRequiredService<FileLinkSigner>();
+
+        var url = signer.CreateUrl(
+            "http://localhost",
+            LocalFileBucket.PreviewsArea,
+            "../../../../etc/passwd",
+            new FileDownload("text/plain", "inline", DateTime.UtcNow.AddMinutes(5)));
+        var response = await host.PublicHost.CreateClient().GetAsync(url);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task InternalHost_ShouldNotServeFiles_WhenLinkIsValid()
+    {
+        using var testScope = host.CreateTestScope();
+        var client = host.CreateStorageClient();
+        var fileId = await Upload(client, "hello");
+        var location = await client.GetDownloadUrlAsync(new GetDownloadUrlRequest { FileId = fileId });
+
+        var response = await host.CreateClient().GetAsync(location.Url);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]
@@ -99,14 +169,6 @@ public class GetDownloadUrlTests(InternalApiTestHost host) : IClassFixture<Inter
             new GetDownloadUrlRequest { FileId = Guid.NewGuid().ToString() }).ResponseAsync);
 
         Assert.Equal(StatusCode.NotFound, exception.StatusCode);
-    }
-
-    [Fact]
-    public async Task LocalFiles_ShouldReturnNotFound_WhenKeyLeavesTheDirectory()
-    {
-        var response = await host.CreateClient().GetAsync("/_local-files/originals/..%2F..%2Fetc%2Fpasswd");
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]

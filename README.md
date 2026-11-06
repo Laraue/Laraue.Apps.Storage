@@ -6,8 +6,9 @@ previews on the server's disk. The service counts each owner's usage and checks 
 the caller passes; the limits themselves stay in the calling app. See [AGENTS.md](AGENTS.md) for the
 design and what's deliberately *not* built yet.
 
-**Stage 1 (BRD-339)**: `UploadFile`, `GetFile`, `GetDownloadUrl` (a signed bucket link to redirect to,
-or a previews path for nginx - file bytes never go out through gRPC), `DeleteFile`, `GetUsage`.
+**Stage 1 (BRD-339)**: internal gRPC `UploadFile`, `GetFile`, `GetDownloadUrl` (a signed link to
+redirect to - file bytes never go out through gRPC), `DeleteFile`, `GetUsage`; and a small public web
+host that serves previews from the server's disk for signed links only.
 
 ## License
 

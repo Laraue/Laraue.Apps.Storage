@@ -3,7 +3,6 @@ using Grpc.Core.Interceptors;
 using Laraue.Apps.Storage.DataAccess;
 using Laraue.Apps.Storage.Internal.Contracts;
 using Laraue.Apps.Storage.InternalApiHost;
-using Laraue.Apps.Storage.InternalApiServices;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -15,6 +14,18 @@ namespace Laraue.Apps.Storage.IntegrationTests.Infrastructure;
 
 public class InternalApiTestHost : WebApplicationFactory<Program>
 {
+    /// <summary>
+    /// Shared with <see cref="PublicHost"/>, which checks the links this host signs.
+    /// </summary>
+    public const string SigningKey = "test-signing-key-0123456789abcdefghijklmnop";
+
+    private WebApiTestHost? _publicHost;
+
+    /// <summary>
+    /// The public web host, serving this host's previews and local originals from the same temp folders.
+    /// </summary>
+    public WebApiTestHost PublicHost => _publicHost ??= new WebApiTestHost(PreviewsDirectory, BucketDirectory);
+
     /// <summary>
     /// Stands in for the bucket: originals are written here (<c>Bucket:LocalDirectory</c>), so no test reaches B2.
     /// </summary>
@@ -31,8 +42,9 @@ public class InternalApiTestHost : WebApplicationFactory<Program>
             {
                 ["Bucket:LocalDirectory"] = BucketDirectory,
                 ["Storage:PreviewsDirectory"] = PreviewsDirectory,
-                // TestServer's address: download links are served by the host's local-files endpoint.
-                ["Storage:LocalFilesBaseUrl"] = "http://localhost" + LocalFilesEndpoint.RoutePrefix,
+                // TestServer's address: download links point at PublicHost.
+                ["Storage:PublicBaseUrl"] = "http://localhost",
+                ["FileLinks:SigningKey"] = SigningKey,
             });
         });
 
@@ -76,6 +88,7 @@ public class InternalApiTestHost : WebApplicationFactory<Program>
 
     protected override void Dispose(bool disposing)
     {
+        _publicHost?.Dispose();
         base.Dispose(disposing);
 
         var root = Directory.GetParent(BucketDirectory)!.FullName;

@@ -1,5 +1,6 @@
 using Laraue.Apps.Storage.Services;
 using Laraue.Apps.Storage.Services.Buckets;
+using Laraue.Apps.Storage.Services.Links;
 using Laraue.Apps.Storage.Services.Previews;
 using Laraue.Core.DateTime.Services.Abstractions;
 using Laraue.Core.DateTime.Services.Impl;
@@ -35,22 +36,23 @@ public static class ServiceCollectionExtensions
                 builder.Services.AddSingleton<S3FileBucket>();
             }
 
+            builder.AddValidatedOptions<FileLinkOptions>("FileLinks");
+            builder.Services.AddSingleton<FileLinkSigner>();
+
             builder.Services.AddSingleton(sp =>
             {
-                var storageOptions = sp.GetRequiredService<IOptions<StorageOptions>>().Value;
-                var localFilesBaseUrl = string.IsNullOrEmpty(storageOptions.LocalFilesBaseUrl)
-                    ? null
-                    : storageOptions.LocalFilesBaseUrl.TrimEnd('/');
+                var links = new LocalFileLinks(
+                    sp.GetRequiredService<FileLinkSigner>(),
+                    sp.GetRequiredService<IOptions<StorageOptions>>().Value.PublicBaseUrl);
 
                 return new FileBuckets(
                     string.IsNullOrEmpty(localBucketDirectory)
                         ? sp.GetRequiredService<S3FileBucket>()
-                        : new LocalFileBucket(
-                            localBucketDirectory,
-                            localFilesBaseUrl is null ? null : $"{localFilesBaseUrl}/{LocalFilesEndpoint.OriginalsArea}"),
+                        : new LocalFileBucket(localBucketDirectory, LocalFileBucket.OriginalsArea, links),
                     new LocalFileBucket(
-                        storageOptions.PreviewsDirectory,
-                        localFilesBaseUrl is null ? null : $"{localFilesBaseUrl}/{LocalFilesEndpoint.PreviewsArea}"));
+                        sp.GetRequiredService<IOptions<StorageOptions>>().Value.PreviewsDirectory,
+                        LocalFileBucket.PreviewsArea,
+                        links));
             });
 
             return builder;

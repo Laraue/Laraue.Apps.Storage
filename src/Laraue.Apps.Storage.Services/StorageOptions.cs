@@ -28,10 +28,12 @@ public class StorageOptions
     public TimeSpan DownloadUrlLifetime { get; set; } = TimeSpan.FromMinutes(30);
 
     /// <summary>
-    /// Local runs and tests only: this host's own address for local files, e.g.
-    /// <c>http://localhost:5564/_local-files</c>. When set, files kept on this machine (previews, and originals with
-    /// <c>Bucket:LocalDirectory</c>) get download links served by the host itself, since there's no nginx in front.
-    /// Never set in production, where previews are served by nginx from the volume.
+    /// Where the public web host (<c>Laraue.Apps.Storage.WebApiHost</c>) is reached by clients, e.g.
+    /// <c>https://files.laraue.com</c>. Links to files on this server's disk (previews, and originals with
+    /// <c>Bucket:LocalDirectory</c>) point there. A domain of its own, so an uploaded file never runs as a page on
+    /// an app's origin.
     /// </summary>
-    public string? LocalFilesBaseUrl { get; set; }
+    [Required]
+    [Url]
+    public required string PublicBaseUrl { get; set; }
 }

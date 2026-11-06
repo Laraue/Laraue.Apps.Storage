@@ -73,18 +73,12 @@ public sealed class StorageGrpcService(IFilesService filesService)
             string.IsNullOrEmpty(request.DownloadFileName) ? null : request.DownloadFileName,
             context.CancellationToken));
 
-        var response = new Contracts.GetDownloadUrlResponse { File = ToContractFile(location.File) };
-        if (location.Url is not null)
+        return new Contracts.GetDownloadUrlResponse
         {
-            response.Url = location.Url;
-            response.ExpiresAt = Timestamp.FromDateTime(DateTime.SpecifyKind(location.ExpiresAt!.Value, DateTimeKind.Utc));
-        }
-        else
-        {
-            response.InternalPath = location.InternalPath;
-        }
-
-        return response;
+            File = ToContractFile(location.File),
+            Url = location.Url,
+            ExpiresAt = Timestamp.FromDateTime(DateTime.SpecifyKind(location.ExpiresAt, DateTimeKind.Utc)),
+        };
     }
 
     public override async Task<Contracts.DeleteFileResponse> DeleteFile(

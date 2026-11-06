@@ -47,10 +47,9 @@ public sealed record QuotaExceeded(long OwnerUsageBytes, long QuotaBytes, long R
 public sealed record FileDeleteResult(bool Deleted, long OwnerUsageBytes);
 
 /// <summary>
-/// Where a client downloads a file: <see cref="Url"/> (redirect until <see cref="ExpiresAt"/>) or, for a preview
-/// served by nginx, <see cref="InternalPath"/> under the previews volume.
+/// Where a client downloads a file: redirect to <see cref="Url"/> until <see cref="ExpiresAt"/>.
 /// </summary>
-public sealed record FileDownloadLocation(FileDetails File, string? Url, string? InternalPath, DateTime? ExpiresAt);
+public sealed record FileDownloadLocation(FileDetails File, string Url, DateTime ExpiresAt);
 
 public interface IFilesService
 {
@@ -248,11 +247,9 @@ public sealed class FilesService(
 
         var details = new FileDetails(file.Id, file.FileName, file.ContentType, file.Size);
 
-        // Previews are read on every board render: nginx serves them from the volume, no link to sign.
-        if (file.Location == StoredFileLocation.LocalDisk && string.IsNullOrEmpty(options.Value.LocalFilesBaseUrl))
-            return new FileDownloadLocation(details, null, file.StorageKey.Replace('\\', '/'), null);
-
-        var expiresAt = dateTimeProvider.UtcNow + options.Value.DownloadUrlLifetime;
+        var expiresAt = file.Location == StoredFileLocation.LocalDisk
+            ? GetPreviewLinkExpiry(dateTimeProvider.UtcNow)
+            : dateTimeProvider.UtcNow + options.Value.DownloadUrlLifetime;
         var download = new FileDownload(
             file.ContentType,
             GetContentDisposition(attachment, downloadFileName ?? file.FileName),
@@ -260,7 +257,7 @@ public sealed class FilesService(
 
         var url = await buckets.For(file.Location).GetDownloadUrl(file.StorageKey, download);
 
-        return new FileDownloadLocation(details, url, null, expiresAt);
+        return new FileDownloadLocation(details, url, expiresAt);
     }
 
     public async Task<FileDeleteResult> DeleteAsync(
@@ -468,6 +465,12 @@ public sealed class FilesService(
 
         return name;
     }
+
+    /// <summary>
+    /// The end of tomorrow (UTC): a preview's link is the same all day, so browsers cache it while a board is
+    /// re-rendered, and it still works for at least a day.
+    /// </summary>
+    private static DateTime GetPreviewLinkExpiry(DateTime now) => DateTime.SpecifyKind(now.Date.AddDays(2), DateTimeKind.Utc);
 
     /// <summary>
     /// <c>inline</c>, or <c>attachment</c> with the name in both forms browsers read (ASCII and RFC 5987 UTF-8).

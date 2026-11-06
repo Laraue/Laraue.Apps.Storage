@@ -64,7 +64,6 @@ public sealed class Program
         }
 
         app.MapGrpcService<StorageGrpcService>();
-        app.MapLocalFiles();
         app.MapHealthChecks("/_health");
         app.MapPrometheusScrapingEndpoint("/_metrics");
 

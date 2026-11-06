@@ -26,10 +26,10 @@ service StorageService {
   // A file's name, type and size. NOT_FOUND for an unknown or deleted file.
   rpc GetFile (GetFileRequest) returns (StoredFile);
 
-  // Where the caller sends its client for the file's bytes - they never pass through gRPC. An
-  // original gets a short-lived signed bucket link to redirect to (the bucket serves byte ranges
-  // itself); a preview on this server's disk gets a path for the web server to serve (nginx
-  // X-Accel-Redirect). NOT_FOUND for an unknown file.
+  // A link the caller redirects its client to (302) for the file's bytes - they never pass through
+  // gRPC or the caller. An original gets a short-lived signed bucket link; a preview gets a signed
+  // link to this service's public web host, stable for a day so browsers cache it. Both serve byte
+  // ranges. NOT_FOUND for an unknown file.
   rpc GetDownloadUrl (GetDownloadUrlRequest) returns (GetDownloadUrlResponse);
 
   // Drops one reference to a file (the one an upload returned). When none is left, the file and
@@ -111,24 +111,19 @@ message GetFileRequest {
 message GetDownloadUrlRequest {
   string file_id = 1;
   // Whether the client should save the file (Content-Disposition: attachment) rather than show it
-  // (inline). Only applies to url.
+  // (inline).
   bool attachment = 2;
-  // The name to save it as; the stored name when empty. Only applies to url.
+  // The name to save it as; the stored name when empty.
   string download_file_name = 3;
 }
 
 message GetDownloadUrlResponse {
   StoredFile file = 1;
-  oneof location {
-    // Redirect the client here (302) until expires_at. Content-Type and Content-Disposition are
-    // set by the link.
-    string url = 2;
-    // A file under the previews volume, relative to it (e.g. "ab/cd/<id>.webp"), for the web
-    // server to serve from its own mount of that volume.
-    string internal_path = 3;
-  }
-  // When url stops working. Unset for internal_path.
-  google.protobuf.Timestamp expires_at = 4;
+  // Redirect the client here until expires_at. Content-Type and Content-Disposition are set by
+  // the link.
+  string url = 2;
+  // When url stops working. A caller may let clients cache its redirect until shortly before.
+  google.protobuf.Timestamp expires_at = 3;
 }
 
 message DeleteFileRequest {
