@@ -33,6 +33,6 @@
     <OpenTelemetryInstrumentationAspNetCoreVersion>1.18.0</OpenTelemetryInstrumentationAspNetCoreVersion>
     <OpenTelemetryInstrumentationRuntimeVersion>1.18.0</OpenTelemetryInstrumentationRuntimeVersion>
     <AwsSdkS3Version>4.0.104.10</AwsSdkS3Version>
-    <SixLaborsImageSharpVersion>4.1.3</SixLaborsImageSharpVersion>
+    <SkiaSharpVersion>4.154.0</SkiaSharpVersion>
   </PropertyGroup>
 </Project>

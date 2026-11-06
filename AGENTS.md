@@ -75,11 +75,14 @@ never exceeds the quota, since it adds nothing. Leaving `quota_bytes` unset mean
   that never come here.
 - Owner, content type (a `type/subtype`), file name (directories and control characters dropped, cut
   to 255 characters with the extension kept).
-- Previews (`PreviewMaker`, ImageSharp): made from the content, not the declared type - anything
-  ImageSharp reads (JPEG, PNG, GIF, WebP...) gets a WebP at most 640 px on its long side (first frame
-  of an animation, never scaled up). Memory is bounded on purpose (the server has little to spare):
-  an 8 MB buffer pool, a 192 MB cap per allocation, images over 40 megapixels skipped, JPEG decoded
-  straight at the preview size. A file ImageSharp can't read is stored without a preview.
+- Previews (`PreviewMaker`, SkiaSharp): made from the content, not the declared type - anything Skia
+  reads (JPEG, PNG, GIF, WebP, BMP...) gets a WebP at most 640 px on its long side: the first frame of
+  an animation, turned upright by its EXIF orientation (phone photos), never scaled up. Memory is
+  bounded on purpose (the server has little to spare): images over 40 megapixels are skipped, and a
+  JPEG is decoded straight at a reduced scale (1/2, 1/4, 1/8). A file Skia can't read is stored without
+  a preview. SkiaSharp (MIT) rather than ImageSharp: every ImageSharp release without known
+  vulnerabilities needs a Six Labors license key to build in Release. The Docker image uses
+  `SkiaSharp.NativeAssets.Linux.NoDependencies`, so no system libraries are needed.
 
 ## Project layout
 

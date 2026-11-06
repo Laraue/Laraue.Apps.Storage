@@ -3,7 +3,6 @@ using Grpc.Core;
 using Laraue.Apps.Storage.Internal.Contracts;
 using Laraue.Apps.Storage.IntegrationTests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
-using SixLabors.ImageSharp;
 using Domain = Laraue.Apps.Storage.DataAccess.Entities;
 
 namespace Laraue.Apps.Storage.IntegrationTests;
@@ -33,7 +32,7 @@ public class UploadFileTests(InternalApiTestHost host) : IClassFixture<InternalA
         Assert.Equal(png.Length + uploaded.Preview.Size, uploaded.OwnerUsageBytes);
 
         var previewBytes = await host.Download(client, uploaded.Preview.Id);
-        var previewInfo = Image.Identify(previewBytes);
+        var previewInfo = TestFiles.Identify(previewBytes);
         Assert.Equal(640, previewInfo.Width);
         Assert.Equal(320, previewInfo.Height);
 
@@ -49,9 +48,36 @@ public class UploadFileTests(InternalApiTestHost host) : IClassFixture<InternalA
         var response = await client.UploadFileAsync(TestFiles.Upload(TestFiles.Png(100, 50), "small.png", "image/png"));
 
         var previewBytes = await host.Download(client, response.Uploaded.Preview.Id);
-        var previewInfo = Image.Identify(previewBytes);
+        var previewInfo = TestFiles.Identify(previewBytes);
         Assert.Equal(100, previewInfo.Width);
         Assert.Equal(50, previewInfo.Height);
+    }
+
+    [Fact]
+    public async Task UploadFile_ShouldScaleJpegPreview_WhenFileIsJpeg()
+    {
+        using var testScope = host.CreateTestScope();
+        var client = host.CreateStorageClient();
+
+        var response = await client.UploadFileAsync(TestFiles.Upload(TestFiles.Jpeg(3000, 2000), "photo.jpg", "image/jpeg"));
+
+        var previewInfo = TestFiles.Identify(await host.Download(client, response.Uploaded.Preview.Id));
+        Assert.Equal(640, previewInfo.Width);
+        Assert.Equal(427, previewInfo.Height);
+    }
+
+    [Fact]
+    public async Task UploadFile_ShouldTurnPreviewUpright_WhenJpegHasExifOrientation()
+    {
+        using var testScope = host.CreateTestScope();
+        var client = host.CreateStorageClient();
+
+        var response = await client.UploadFileAsync(
+            TestFiles.Upload(TestFiles.JpegWithOrientation(1200, 600, orientation: 6), "phone.jpg", "image/jpeg"));
+
+        var previewInfo = TestFiles.Identify(await host.Download(client, response.Uploaded.Preview.Id));
+        Assert.Equal(320, previewInfo.Width);
+        Assert.Equal(640, previewInfo.Height);
     }
 
     [Fact]

@@ -10,7 +10,6 @@
     <ItemGroup>
         <PackageReference Include="coverlet.collector" Version="10.0.1"/>
         <PackageReference Include="Grpc.Net.Client" Version="$(GrpcNetClientVersion)" />
-        <PackageReference Include="SixLabors.ImageSharp" Version="$(SixLaborsImageSharpVersion)" />
         <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.2" />
         <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.2" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1"/>

@@ -13,7 +13,9 @@
     <ItemGroup>
       <PackageReference Include="AWSSDK.S3" Version="$(AwsSdkS3Version)" />
       <PackageReference Include="Laraue.Core.DateTime" Version="$(LaraueCoreDateTimeVersion)" />
-      <PackageReference Include="SixLabors.ImageSharp" Version="$(SixLaborsImageSharpVersion)" />
+      <PackageReference Include="SkiaSharp" Version="$(SkiaSharpVersion)" />
+      <!-- The Linux native library with no system dependencies, for the Docker image. -->
+      <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="$(SkiaSharpVersion)" />
     </ItemGroup>
 
     <ItemGroup>
