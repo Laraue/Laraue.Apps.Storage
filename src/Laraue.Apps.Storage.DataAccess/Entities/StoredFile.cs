@@ -4,7 +4,7 @@ namespace Laraue.Apps.Storage.DataAccess.Entities;
 
 /// <summary>
 /// One stored file in the bucket: an uploaded original, or the preview made from an image. Both are stored under
-/// their own id (<see cref="StorageKey"/>, the id as 32 hex digits); the type is kept with the object.
+/// their own id (<see cref="StorageKey"/>, the id as a standard GUID string); the type is kept with the object.
 /// </summary>
 public class StoredFile
 {

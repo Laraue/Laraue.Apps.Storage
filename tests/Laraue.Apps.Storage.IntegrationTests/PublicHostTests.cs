@@ -56,11 +56,10 @@ public class PublicHostTests(InternalApiTestHost host) : IClassFixture<InternalA
     }
 
     [Theory]
-    [InlineData("/0123456789abcdef0123456789abcdef")]
-    [InlineData("/0123456789abcdef0123456789abcdef.headers.json")]
-    [InlineData("/0123456789ABCDEF0123456789ABCDEF")]
-    [InlineData("/0123456789abcdef0123456789abcde")]
-    [InlineData("/files/0123456789abcdef0123456789abcdef")]
+    [InlineData("/01234567-89ab-cdef-0123-456789abcdef")]
+    [InlineData("/01234567-89ab-cdef-0123-456789abcdef.headers.json")]
+    [InlineData("/01234567-89ab-cdef-0123-456789abcde")]
+    [InlineData("/files/01234567-89ab-cdef-0123-456789abcdef")]
     [InlineData("/NOT-A-FILE-ID")]
     [InlineData("/..%2F..%2Fetc%2Fpasswd")]
     public async Task GetFile_ShouldReturnNotFound_WhenKeyIsUnknownOrNotAFile(string path)
@@ -85,6 +84,18 @@ public class PublicHostTests(InternalApiTestHost host) : IClassFixture<InternalA
 
         Assert.Contains("storage_public_reads_total{otel_scope_name=\"Laraue.Apps.Storage\",result=\"served\"}", body);
         Assert.Contains("storage_public_reads_total{otel_scope_name=\"Laraue.Apps.Storage\",result=\"not_found\"}", body);
+    }
+
+    [Fact]
+    public async Task GetFile_ShouldServeFile_WhenIdIsWrittenWithoutDashes()
+    {
+        using var testScope = host.CreateTestScope();
+        var client = host.CreateStorageClient();
+        var uploaded = (await client.UploadFileAsync(TestFiles.Upload(TestFiles.Text("same file")))).Uploaded;
+
+        var response = await host.PublicHost.CreateClient().GetAsync($"/{Guid.Parse(uploaded.File.Id):N}");
+
+        Assert.Equal("same file", await response.Content.ReadAsStringAsync());
     }
 
     /// <summary>

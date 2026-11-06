@@ -579,8 +579,9 @@ public sealed class FilesService(
     }
 
     /// <summary>
-    /// Originals and previews alike: the file's own id. Its type lives in the object's headers, not in the key.
+    /// Originals and previews alike: the file's own id, formatted like the <c>id</c> callers get. Its type lives in
+    /// the object's headers, not in the key.
     /// </summary>
-    private static string GetStorageKey(Guid fileId) => fileId.ToString("N");
+    public static string GetStorageKey(Guid fileId) => fileId.ToString();
 
 }
