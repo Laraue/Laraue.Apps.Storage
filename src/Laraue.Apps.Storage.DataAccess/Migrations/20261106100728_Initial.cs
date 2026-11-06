@@ -1,0 +1,121 @@
+﻿using System;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+
+#nullable disable
+
+namespace Laraue.Apps.Storage.DataAccess.Migrations
+{
+    /// <inheritdoc />
+    public partial class Initial : Migration
+    {
+        /// <inheritdoc />
+        protected override void Up(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.CreateTable(
+                name: "services",
+                columns: table => new
+                {
+                    id = table.Column<int>(type: "integer", nullable: false),
+                    code = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
+                    name = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("pk_services", x => x.id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "owners",
+                columns: table => new
+                {
+                    id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    service_id = table.Column<int>(type: "integer", nullable: false),
+                    key = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: false),
+                    usage_bytes = table.Column<long>(type: "bigint", nullable: false),
+                    created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("pk_owners", x => x.id);
+                    table.ForeignKey(
+                        name: "fk_owners_services_service_id",
+                        column: x => x.service_id,
+                        principalTable: "services",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "stored_files",
+                columns: table => new
+                {
+                    id = table.Column<Guid>(type: "uuid", nullable: false),
+                    owner_id = table.Column<long>(type: "bigint", nullable: false),
+                    kind = table.Column<int>(type: "integer", nullable: false),
+                    location = table.Column<int>(type: "integer", nullable: false),
+                    storage_key = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
+                    file_name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
+                    content_type = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: false),
+                    size = table.Column<long>(type: "bigint", nullable: false),
+                    content_hash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
+                    source_file_id = table.Column<Guid>(type: "uuid", nullable: true),
+                    references = table.Column<int>(type: "integer", nullable: false),
+                    uploaded_by_user_id = table.Column<Guid>(type: "uuid", nullable: true),
+                    created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("pk_stored_files", x => x.id);
+                    table.ForeignKey(
+                        name: "fk_stored_files_owners_owner_id",
+                        column: x => x.owner_id,
+                        principalTable: "owners",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "fk_stored_files_stored_files_source_file_id",
+                        column: x => x.source_file_id,
+                        principalTable: "stored_files",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.InsertData(
+                table: "services",
+                columns: new[] { "id", "code", "name" },
+                values: new object[] { 1, "laraue_boards", "Laraue Boards" });
+
+            migrationBuilder.CreateIndex(
+                name: "ix_owners_service_id_key",
+                table: "owners",
+                columns: new[] { "service_id", "key" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "ix_stored_files_owner_id_content_hash",
+                table: "stored_files",
+                columns: new[] { "owner_id", "content_hash" });
+
+            migrationBuilder.CreateIndex(
+                name: "ix_stored_files_source_file_id",
+                table: "stored_files",
+                column: "source_file_id",
+                unique: true);
+        }
+
+        /// <inheritdoc />
+        protected override void Down(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.DropTable(
+                name: "stored_files");
+
+            migrationBuilder.DropTable(
+                name: "owners");
+
+            migrationBuilder.DropTable(
+                name: "services");
+        }
+    }
+}

@@ -1,0 +1,139 @@
+syntax = "proto3";
+
+option csharp_namespace = "Laraue.Apps.Storage.Internal.Contracts";
+package laraue.apps.storage.internal.v1;
+
+// Service-to-service contract other Laraue apps call to keep their users' files here.
+//
+// Which service is calling is identified once per client via the "x-laraue-service-id" metadata
+// header (see GrpcHeaders.ServiceIdHeaderName in this package, value = the numeric ServiceId
+// below), not repeated on every request message. Every call requires it, and a service sees only
+// its own files: another service's file id is NOT_FOUND.
+//
+// Files belong to an owner, a key the calling service chooses (Boards: "organization:42"). The
+// owner's usage is the stored size of its files (originals plus previews); this service doesn't
+// know the owner's limit, the caller passes it with each upload.
+service StorageService {
+  // Stores a file for an owner and returns it, with a preview for an image. The same content
+  // uploaded again for the same owner isn't stored twice: the existing file is returned and gains
+  // a reference, and DeleteFile removes it only when the last reference is gone. A file over the
+  // size this service accepts, an empty file or an invalid owner is INVALID_ARGUMENT.
+  rpc UploadFile (UploadFileRequest) returns (UploadFileResponse);
+
+  // A file's name, type and size. NOT_FOUND for an unknown or deleted file.
+  rpc GetFile (GetFileRequest) returns (StoredFile);
+
+  // Streams a file's content, or the byte range asked for. The first message carries only the
+  // header, the rest only data. NOT_FOUND for an unknown file, OUT_OF_RANGE for a range starting
+  // past the end.
+  rpc ReadFile (ReadFileRequest) returns (stream ReadFileResponse);
+
+  // Drops one reference to a file (the one an upload returned). When none is left, the file and
+  // its preview are deleted and the owner's usage goes down. Deleting an unknown file is not an
+  // error.
+  rpc DeleteFile (DeleteFileRequest) returns (DeleteFileResponse);
+
+  // The owner's current usage in bytes.
+  rpc GetUsage (GetUsageRequest) returns (GetUsageResponse);
+}
+
+enum ServiceId {
+  SERVICE_ID_UNSPECIFIED = 0;
+  SERVICE_ID_LARAUE_BOARDS = 1;
+}
+
+message StoredFile {
+  string id = 1;
+  string file_name = 2;
+  string content_type = 3;
+  // Stored size in bytes.
+  int64 size = 4;
+}
+
+message UploadFileRequest {
+  // The owner the file is stored for and whose usage it counts toward, chosen by the caller.
+  // 1-128 characters.
+  string owner = 1;
+  // The global Laraue user id (from Identity) of whoever uploaded it, kept for audit. Optional.
+  string user_id = 2;
+  string file_name = 3;
+  // What the file is stored and served as. The caller checks the type; this service only uses
+  // the content itself to decide whether it's an image it can make a preview for.
+  string content_type = 4;
+  bytes content = 5;
+  // The owner's limit. When set and the new file (with its preview) would take the owner's usage
+  // over it, nothing is stored and the response is quota_exceeded. A duplicate never exceeds it.
+  optional int64 quota_bytes = 6;
+}
+
+message UploadFileResponse {
+  oneof result {
+    UploadedFile uploaded = 1;
+    QuotaExceeded quota_exceeded = 2;
+  }
+}
+
+message UploadedFile {
+  StoredFile file = 1;
+  // A smaller image (about 640 px on the long side) for an image upload; unset otherwise, or when
+  // the image couldn't be read.
+  optional StoredFile preview = 2;
+  // The owner's usage after this upload.
+  int64 owner_usage_bytes = 3;
+  // Whether the content was already stored for this owner and the existing file is returned.
+  bool deduplicated = 4;
+}
+
+message QuotaExceeded {
+  int64 owner_usage_bytes = 1;
+  int64 quota_bytes = 2;
+  // What the upload would have added.
+  int64 required_bytes = 3;
+}
+
+message GetFileRequest {
+  string file_id = 1;
+}
+
+message ReadFileRequest {
+  string file_id = 1;
+  // A single HTTP-style byte range: from-to, from- (to unset) or the last suffix_length bytes.
+  // Leave all unset for the whole file.
+  optional int64 range_from = 2;
+  optional int64 range_to = 3;
+  optional int64 suffix_length = 4;
+}
+
+message ReadFileResponse {
+  oneof part {
+    ReadFileHeader header = 1;
+    bytes data = 2;
+  }
+}
+
+message ReadFileHeader {
+  StoredFile file = 1;
+  // The bytes from..to (inclusive) of total_length follow; partial when a range was applied.
+  int64 from = 2;
+  int64 to = 3;
+  int64 total_length = 4;
+  bool partial = 5;
+}
+
+message DeleteFileRequest {
+  string file_id = 1;
+}
+
+message DeleteFileResponse {
+  // Whether the file itself was deleted (its last reference was dropped).
+  bool deleted = 1;
+  int64 owner_usage_bytes = 2;
+}
+
+message GetUsageRequest {
+  string owner = 1;
+}
+
+message GetUsageResponse {
+  int64 usage_bytes = 1;
+}
