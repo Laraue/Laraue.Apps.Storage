@@ -36,8 +36,8 @@ public static class ServiceCollectionExtensions
             if (builder.Configuration.GetSection("Cloudflare").Exists())
             {
                 builder.AddValidatedOptions<CloudflareOptions>("Cloudflare");
-                builder.Services.AddHttpClient<ICdnCache, CloudflareCdnCache>(
-                    client => client.BaseAddress = new Uri(CloudflareCdnCache.BaseAddress));
+                builder.Services.AddHttpClient<ICdnCache, CloudflareCdnCache>((sp, client) =>
+                    CloudflareCdnCache.ConfigureClient(client, sp.GetRequiredService<IOptions<CloudflareOptions>>().Value));
             }
             else
             {

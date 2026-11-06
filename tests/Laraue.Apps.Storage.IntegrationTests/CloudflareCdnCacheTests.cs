@@ -37,9 +37,11 @@ public class CloudflareCdnCacheTests
 
     private static CloudflareCdnCache CreateCache(HttpMessageHandler handler)
     {
-        return new CloudflareCdnCache(
-            new HttpClient(handler) { BaseAddress = new Uri(CloudflareCdnCache.BaseAddress) },
-            Options.Create(new CloudflareOptions { ZoneId = "zone-1", ApiToken = "token-1" }));
+        var options = new CloudflareOptions { ZoneId = "zone-1", ApiToken = "token-1" };
+        var client = new HttpClient(handler);
+        CloudflareCdnCache.ConfigureClient(client, options);
+
+        return new CloudflareCdnCache(client, Options.Create(options));
     }
 
     private sealed class RecordingHandler(HttpStatusCode statusCode) : HttpMessageHandler
