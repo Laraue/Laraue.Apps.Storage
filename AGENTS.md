@@ -89,7 +89,7 @@ never exceeds the quota, since it adds nothing. Leaving `quota_bytes` unset mean
 
 ## What this service checks
 
-- Size: at most `Storage:MaxFileSizeBytes` (20 MB by default), not empty. Callers enforce their own,
+- Size: at most `Storage:MaxFileSizeBytes` (20 MB), not empty. Callers enforce their own,
   smaller per-type limits first (Boards: images 3 MB, documents 10 MB) and their own allowed types -
   Boards' `AttachmentFileTypes` stays in Boards, since it also judges files from Telegram messages
   that never come here.
@@ -183,12 +183,12 @@ go into a committed `appsettings.json` - production values come from the deploy 
 
 Settings `InternalApiHost` needs:
 - `ConnectionStrings:Postgre`.
-- `Storage:MaxFileSizeBytes` - optional, 20 MB by default.
+- `Storage:MaxFileSizeBytes` (20 MB) and `Storage:PendingReferenceLifetime` (24 hours) - committed
+  in `appsettings.json`, not as defaults in the options class; production doesn't override them.
 - `Bucket:ServiceUrl`, `Bucket:Region`, `Bucket:BucketName`, `Bucket:KeyId`, `Bucket:ApplicationKey`
   - not committed; Production validates them at startup.
 - `Storage:PublicBaseUrl` - the bucket's URL on the files domain (`https://files.laraue.com/file/<bucket>`).
   Production validates it; set it in `appsettings.Development.json` for local runs.
-- `Storage:PendingReferenceLifetime` - optional, 24 hours by default.
 - `Bucket:LocalDirectory` - tests and local runs without a bucket: files go to that folder instead of
   B2 and the `Bucket:*` credentials aren't needed. To click through downloads locally, point `Bucket:*`
   and `Storage:PublicBaseUrl` at a development B2 bucket (or a local S3 server, MinIO) instead.
